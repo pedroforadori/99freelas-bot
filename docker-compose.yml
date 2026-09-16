@@ -1,0 +1,11 @@
+services:
+  bot:
+    build: .
+    container_name: 99freelas-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+      - ./logs:/app/logs

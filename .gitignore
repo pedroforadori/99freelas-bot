@@ -1,0 +1,9 @@
+.env
+config.yaml
+venv/
+__pycache__/
+*.pyc
+data/applied_jobs.json
+data/auth_state.json
+data/dry_run_seen.json
+logs/
