@@ -36,6 +36,18 @@ proposal:
   undercut_percent: 5                        # usado só se oferta_estrategia = "menor_proposta"
   prazo_dias: 7
 
+  # Desconto paliativo sobre a sugestão de preço da IA (usada só quando não há nem
+  # orçamento do cliente nem propostas concorrentes pra basear o valor — ver
+  # ai_writer.suggest_price_and_deadline). Por experiência no 99Freelas, a IA sugere um
+  # preço de mercado "real", mas cliente costuma fechar com o mais barato — arredonda a
+  # sugestão pra baixo no milhar mais próximo e desconta mais ia_desconto_milhar reais
+  # (ex: sugestão R$2400 -> oferta R$1000; R$3300 -> R$2000). Só se aplica a sugestões
+  # >= R$1000; abaixo disso já é considerado baixo o suficiente e fica como está. Nunca
+  # deixa a oferta final abaixo de ia_preco_minimo. Ajuste esses dois valores conforme for
+  # validando o resultado das próximas propostas.
+  ia_desconto_milhar: 1000
+  ia_preco_minimo: 150
+
   # "ia" gera o texto a partir da descrição completa do projeto; regras de não incluir
   #   contato/valor/prazo são reforçadas por um filtro automático — se a IA falhar ou
   #   violar essas regras, cai pro "texto" abaixo.

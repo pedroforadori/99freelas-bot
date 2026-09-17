@@ -173,7 +173,12 @@ def _origem_line(proposal: dict) -> str | None:
     label = ORIGEM_LABELS.get(origem, origem)
     if proposal.get("ajustado_manualmente"):
         label += " · ajustado manualmente"
-    return f"<b>Origem do valor/prazo:</b> {label}"
+    linha = f"<b>Origem do valor/prazo:</b> {label}"
+
+    oferta_sugerida = proposal.get("oferta_sugerida_ia")
+    if oferta_sugerida is not None:
+        linha += f"\n<i>(IA sugeriu R$ {format_currency_br(oferta_sugerida)} — desconto competitivo aplicado)</i>"
+    return linha
 
 
 def notify_proposal_result(

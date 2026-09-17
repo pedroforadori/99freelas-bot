@@ -20,6 +20,26 @@ ORIGEM_LABELS = {
 }
 
 
+def _aplicar_desconto_competitivo(oferta_sugerida: float, proposal_cfg: dict) -> float:
+    """
+    Desconto paliativo sobre a sugestão de preço da IA (ver build_proposal/
+    ai_writer.suggest_price_and_deadline): por experiência do usuário no 99Freelas, a IA
+    tende a sugerir um preço de mercado "real", mas o cliente geralmente fecha com o
+    freelancer mais barato — arredonda a sugestão pra baixo no milhar mais próximo e
+    desconta mais `ia_desconto_milhar` reais (ex: R$2400 -> R$1000, R$3300 -> R$2000).
+    Só se aplica a sugestões >= R$1000 (abaixo disso já é considerado baixo o suficiente);
+    nunca deixa o resultado abaixo de `ia_preco_minimo`. Ainda não validado com dados reais
+    — os dois parâmetros existem em config.yaml especificamente pra serem ajustados
+    conforme o resultado das próximas propostas.
+    """
+    if oferta_sugerida < 1000:
+        return oferta_sugerida
+    desconto = proposal_cfg.get("ia_desconto_milhar", 1000)
+    piso = proposal_cfg.get("ia_preco_minimo", 150)
+    ajustada = (oferta_sugerida // 1000) * 1000 - desconto
+    return max(ajustada, piso)
+
+
 def _build_texto(project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None) -> str:
     proposal_cfg = config.get("proposal", {})
     modo = proposal_cfg.get("texto_modo", "fixo")
@@ -85,7 +105,8 @@ def build_proposal(
                 project.get("title"),
             )
             return None
-        oferta, prazo_dias = sugestao
+        oferta_sugerida_ia, prazo_dias = sugestao
+        oferta = _aplicar_desconto_competitivo(oferta_sugerida_ia, proposal_cfg)
         origem = "ia"
     elif estrategia == "fixo" and proposal_cfg.get("oferta_fixa") is not None:
         oferta = proposal_cfg["oferta_fixa"]
@@ -112,9 +133,17 @@ def build_proposal(
         )
         texto = _SAFE_FALLBACK_TEXTO
 
+    resultado = {"oferta": oferta, "prazo_dias": prazo_dias, "texto": texto, "origem_valor": origem}
+    if origem == "ia" and oferta_sugerida_ia != oferta:
+        # Guarda o valor bruto sugerido pela IA (antes do desconto competitivo) pra
+        # notifier.py mostrar os dois lado a lado no Telegram — ajuda a validar/lapidar
+        # ia_desconto_milhar/ia_preco_minimo em config.yaml com dados reais ao longo do tempo.
+        resultado["oferta_sugerida_ia"] = oferta_sugerida_ia
+
     log.info(
-        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s",
+        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s%s",
         project.get("title"), oferta, prazo_dias, origem,
+        f" (IA sugeriu R${oferta_sugerida_ia})" if "oferta_sugerida_ia" in resultado else "",
     )
 
-    return {"oferta": oferta, "prazo_dias": prazo_dias, "texto": texto, "origem_valor": origem}
+    return resultado
