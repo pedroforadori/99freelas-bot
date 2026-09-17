@@ -12,6 +12,7 @@ import requests
 
 from bot import approvals, connections, storage
 from bot.logger_setup import get_logger
+from bot.proposal import ORIGEM_LABELS
 from bot.utils import daily_quota, format_currency_br
 
 log = get_logger(__name__)
@@ -157,6 +158,24 @@ def _conexoes_usadas_line(status: str, simulated: bool) -> str | None:
     return f"<b>Conexões usadas:</b> {usadas}/{total}"
 
 
+def _origem_line(proposal: dict) -> str | None:
+    """
+    Monta a linha mostrando de onde veio o valor/prazo da proposta (IA, média de
+    propostas concorrentes, orçamento do cliente ou valor fixo — ver
+    proposal.ORIGEM_LABELS). Retorna None se a proposta não tiver esse campo (propostas
+    pendentes montadas antes dessa mudança, já persistidas em data/pending_approvals.json).
+    Se o valor/prazo foi ajustado manualmente pelos botões ➖/➕ (ver notifier._handle_adjust),
+    isso é sinalizado à parte, já que a origem original deixa de refletir o valor exibido.
+    """
+    origem = proposal.get("origem_valor")
+    if not origem:
+        return None
+    label = ORIGEM_LABELS.get(origem, origem)
+    if proposal.get("ajustado_manualmente"):
+        label += " · ajustado manualmente"
+    return f"<b>Origem do valor/prazo:</b> {label}"
+
+
 def notify_proposal_result(
     project: dict, proposal: dict | None, status: str, detail: str, simulated: bool = False
 ) -> None:
@@ -183,6 +202,9 @@ def notify_proposal_result(
     if proposal:
         linhas.append(f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}")
         linhas.append(f"<b>Prazo:</b> {proposal['prazo_dias']} dias")
+        origem_line = _origem_line(proposal)
+        if origem_line:
+            linhas.append(origem_line)
 
     linhas.append(_propostas_hoje_line(status, simulated))
     linha_conexoes = _conexoes_usadas_line(status, simulated)
@@ -227,6 +249,9 @@ def _approval_text(project: dict, proposal: dict) -> str:
         f"<b>Link:</b> {project.get('url', '')}\n"
     )
     valores = f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}\n<b>Prazo:</b> {proposal['prazo_dias']} dias\n"
+    origem_line = _origem_line(proposal)
+    if origem_line:
+        valores += f"{origem_line}\n"
     texto_proposta = proposal["texto"]
     descricao = proposal.get("full_description") or project.get("description") or ""
 
@@ -351,6 +376,7 @@ def _handle_adjust(callback_id: str, message_id: int | None, field: str, sign: s
         return
 
     proposal = dict(entry["proposal"])
+    proposal["ajustado_manualmente"] = True
     delta = 1 if sign == "+" else -1
     if field == "o":
         proposal["oferta"] = max(0.0, round(proposal["oferta"] + delta * _oferta_step_reais(), 2))

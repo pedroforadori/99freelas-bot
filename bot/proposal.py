@@ -8,6 +8,17 @@ log = get_logger(__name__)
 # check_text_safety mesmo assim. Sem placeholders, sem risco nenhum.
 _SAFE_FALLBACK_TEXTO = "Olá! Tenho interesse nesse projeto e gostaria de conversar sobre os detalhes. Fico à disposição."
 
+# Rótulos exibidos no Telegram (ver notifier._approval_text/notify_proposal_result) pra
+# deixar claro de onde veio o valor/prazo de cada proposta — a IA só é chamada pra sugerir
+# preço quando não há nem orçamento do cliente nem média de propostas concorrentes (ver
+# build_proposal abaixo), então o usuário precisa saber qual base foi usada antes de aprovar.
+ORIGEM_LABELS = {
+    "ia": "🤖 Sugerido pela IA (sem orçamento do cliente nem propostas concorrentes)",
+    "menor_proposta": "📊 Baseado na média das propostas concorrentes",
+    "orcamento_cliente": "💰 Baseado no orçamento do cliente",
+    "fixo": "📌 Valor fixo configurado",
+}
+
 
 def _build_texto(project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None) -> str:
     proposal_cfg = config.get("proposal", {})
@@ -60,6 +71,7 @@ def build_proposal(
     if estrategia == "menor_proposta" and lowest_bid:
         undercut_percent = proposal_cfg.get("undercut_percent", 5)
         oferta = round(lowest_bid * (1 - undercut_percent / 100), 2)
+        origem = "menor_proposta"
     elif estrategia == "menor_proposta" and not lowest_bid and not budget and full_description:
         # Nem "menor proposta" (média concorrente) nem orçamento do cliente disponíveis —
         # em vez de cair direto pra oferta_fixa/0, pede à IA uma sugestão coerente com o
@@ -74,12 +86,15 @@ def build_proposal(
             )
             return None
         oferta, prazo_dias = sugestao
+        origem = "ia"
     elif estrategia == "fixo" and proposal_cfg.get("oferta_fixa") is not None:
         oferta = proposal_cfg["oferta_fixa"]
+        origem = "fixo"
     else:
         # sem proposta concorrente pra usar de base (ou estratégia orcamento_cliente):
         # usa o orçamento anunciado pelo cliente; se não houver, cai pra oferta_fixa ou 0
         oferta = orcamento_cliente
+        origem = "orcamento_cliente"
 
     texto = _build_texto(project, config, oferta, prazo_dias, full_description)
 
@@ -97,6 +112,9 @@ def build_proposal(
         )
         texto = _SAFE_FALLBACK_TEXTO
 
-    log.info("Proposta montada para '%s': oferta=R$%s, prazo=%sd", project.get("title"), oferta, prazo_dias)
+    log.info(
+        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s",
+        project.get("title"), oferta, prazo_dias, origem,
+    )
 
-    return {"oferta": oferta, "prazo_dias": prazo_dias, "texto": texto}
+    return {"oferta": oferta, "prazo_dias": prazo_dias, "texto": texto, "origem_valor": origem}
