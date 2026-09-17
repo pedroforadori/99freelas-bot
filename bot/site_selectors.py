@@ -9,6 +9,9 @@ de rede para testar). Na primeira execução com HEADLESS=false, abra o DevTools
 aqui. Centralizar aqui evita ter que caçar seletores espalhados pelo código.
 """
 
+# --- Dashboard (saldo de conexões) ---
+DASHBOARD_URL = "https://www.99freelas.com.br/dashboard"
+
 # --- Login ---
 LOGIN_URL = "https://www.99freelas.com.br/login"
 LOGIN_EMAIL_INPUT = "#email"
@@ -55,10 +58,20 @@ PROJECT_PAGE_DESCRIPTION = ".item-text.project-description"
 # "Enviar proposta" é um link que NAVEGA pra uma página separada (/project/bid/<slug>-<id>),
 # não abre um formulário na mesma página — ver navegação explícita em submitter.py.
 PROPOSAL_BUTTON = "a.clickable:has-text('Enviar proposta')"
-# Campo que mostra o menor valor já proposto por outro freelancer nesse projeto
-# (aparece dentro do formulário de proposta, depois de clicar em PROPOSAL_BUTTON).
-# Se o projeto ainda não tem nenhuma proposta, o elemento pode não existir — tratado como None.
-PROPOSAL_LOWEST_BID = "[data-testid='lowest-proposal'], .menor-proposta, .lowest-bid"
+# Confirmado: quando a conta não tem o plano Freelancer Premium ativo, ESTE link
+# ("Ver plano") aparece no lugar de PROPOSAL_BUTTON — testado em 10/10 projetos reais
+# da listagem, mesmo com conexões disponíveis. Checar isso ANTES de tentar clicar em
+# PROPOSAL_BUTTON evita timeout e dá um motivo de falha claro em vez de "botão não encontrado".
+PROPOSAL_PREMIUM_REQUIRED_MARKER = "a[href='/freelancer-premium']"
+# Confirmado: bloco com "Valor médio das propostas" e "Duração média estimada" (não o
+# menor valor — só a média está disponível sem Premium), dentro da página de envio
+# (/project/bid/..., depois de clicar em PROPOSAL_BUTTON). Ex real:
+# <div class="generic information">Valor médio das propostas: <b>R$&nbsp;857,87</b><br>
+# Duração média estimada: <b>10 dias</b></div>
+# Só existe quando o projeto já tem propostas suficientes pra calcular a média — em
+# projetos bem recentes (o alvo do nosso filtro de idade) costuma estar ausente; nesse
+# caso _read_lowest_bid retorna None e build_proposal cai pro fallback normal.
+PROPOSAL_LOWEST_BID = ".generic.information"
 PROPOSAL_OFERTA_INPUT = "#oferta"
 PROPOSAL_PRAZO_INPUT = "#duracao-estimada"
 PROPOSAL_DETALHES_TEXTAREA = "#proposta"

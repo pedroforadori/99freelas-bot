@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from bot import scraper, submitter
+from bot import connections, notifier, scraper, submitter
 from bot.filter import is_match
 from bot.logger_setup import get_logger
 from bot.main import load_config, open_authenticated_page
@@ -50,6 +50,10 @@ def _save_seen(seen: set) -> None:
 
 
 def run_cycle(page, config: dict, seen: set) -> None:
+    # Mesmo em simulação, mantém o cache de connections.py atualizado — assim as
+    # notificações de dry run já mostram o contador real "Conexões usadas: X/Y".
+    connections.refresh(page)
+
     projects = scraper.fetch_open_projects(page)
     new_projects = [p for p in projects if p["id"] not in seen]
     log.info("[DRY RUN] %d projetos novos (de %d na página).", len(new_projects), len(projects))
@@ -93,6 +97,7 @@ def main() -> None:
             sys.exit(1)
 
         log.info("[DRY RUN] Simulação iniciada — NENHUMA proposta real será enviada. Ctrl+C pra parar.")
+        notifier.notify_bot_status("started", simulated=True)
         try:
             while True:
                 try:
@@ -105,6 +110,11 @@ def main() -> None:
                 time.sleep(wait_s)
         except KeyboardInterrupt:
             log.info("[DRY RUN] Interrompido pelo usuário.")
+            notifier.notify_bot_status("stopped", simulated=True)
+        except Exception as e:
+            log.exception("[DRY RUN] Erro fatal fora do ciclo: %s", e)
+            notifier.notify_bot_status("stopped_error", str(e), simulated=True)
+            raise
         finally:
             browser.close()
 

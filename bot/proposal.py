@@ -4,6 +4,10 @@ from bot.utils import format_currency_br
 
 log = get_logger(__name__)
 
+# Usado só se o texto final (de QUALQUER origem — IA ou template fixo) violar
+# check_text_safety mesmo assim. Sem placeholders, sem risco nenhum.
+_SAFE_FALLBACK_TEXTO = "Olá! Tenho interesse nesse projeto e gostaria de conversar sobre os detalhes. Fico à disposição."
+
 
 def _build_texto(project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None) -> str:
     proposal_cfg = config.get("proposal", {})
@@ -28,27 +32,48 @@ def build_proposal(
     config: dict,
     lowest_bid: float | None = None,
     full_description: str | None = None,
-) -> dict:
+) -> dict | None:
     """
     Monta oferta, prazo e texto da proposta. Retorna dict pronto pra ser usado pelo
-    submitter: {"oferta", "prazo_dias", "texto"}.
+    submitter: {"oferta", "prazo_dias", "texto"} — ou None no único caso em que não há
+    NENHUM dado pra basear um preço (ver ramo "menor_proposta" abaixo) e a IA também não
+    conseguiu sugerir um valor; nesse caso não faz sentido montar uma proposta com
+    oferta=0, e o chamador (submitter.prepare_proposal) deve tratar como falha de preparo.
 
-    lowest_bid: menor valor já proposto por outro freelancer no projeto (lido da página
-    de envio de proposta), usado quando oferta_estrategia == "menor_proposta". None se
-    o projeto ainda não tem nenhuma proposta ou o valor não pôde ser lido.
+    lowest_bid: valor médio das propostas concorrentes já enviadas nesse projeto (lido da
+    página de envio de proposta), usado quando oferta_estrategia == "menor_proposta". None
+    se o projeto ainda não tem propostas suficientes acumuladas pra calcular a média —
+    comum em projetos recém-publicados, o alvo do filtro de idade deste bot.
 
     full_description: descrição completa do projeto (lida da página do projeto, sem o
-    truncamento da listagem), usada quando proposal.texto_modo == "ia" em config.yaml.
-    Se ausente ou a geração via IA falhar/for rejeitada pelo filtro de segurança, cai
-    pro template fixo em proposal.texto.
+    truncamento da listagem). Usada tanto pra gerar o texto via IA (proposal.texto_modo
+    == "ia") quanto, quando lowest_bid e o orçamento do cliente estão ausentes, pra pedir
+    à IA uma sugestão de valor/prazo (ver bot/ai_writer.suggest_price_and_deadline) —
+    sem essa segunda IA-sugestão, o comportamento seria cair direto pra oferta_fixa ou 0.
     """
     proposal_cfg = config.get("proposal", {})
     estrategia = proposal_cfg.get("oferta_estrategia", "orcamento_cliente")
-    orcamento_cliente = project.get("budget") or proposal_cfg.get("oferta_fixa") or 0
+    budget = project.get("budget")
+    orcamento_cliente = budget or proposal_cfg.get("oferta_fixa") or 0
+    prazo_dias = proposal_cfg.get("prazo_dias", 7)
 
     if estrategia == "menor_proposta" and lowest_bid:
         undercut_percent = proposal_cfg.get("undercut_percent", 5)
         oferta = round(lowest_bid * (1 - undercut_percent / 100), 2)
+    elif estrategia == "menor_proposta" and not lowest_bid and not budget and full_description:
+        # Nem "menor proposta" (média concorrente) nem orçamento do cliente disponíveis —
+        # em vez de cair direto pra oferta_fixa/0, pede à IA uma sugestão coerente com o
+        # escopo descrito, buscando um valor baixo pra maximizar aceitação (decisão
+        # explícita do usuário: sem piso fixo configurado, a IA julga o valor por projeto).
+        sugestao = ai_writer.suggest_price_and_deadline(project, full_description, config)
+        if sugestao is None:
+            log.warning(
+                "Sem menor proposta, sem orçamento do cliente, e a IA não conseguiu sugerir "
+                "preço/prazo pra '%s' — proposta não pode ser montada.",
+                project.get("title"),
+            )
+            return None
+        oferta, prazo_dias = sugestao
     elif estrategia == "fixo" and proposal_cfg.get("oferta_fixa") is not None:
         oferta = proposal_cfg["oferta_fixa"]
     else:
@@ -56,8 +81,21 @@ def build_proposal(
         # usa o orçamento anunciado pelo cliente; se não houver, cai pra oferta_fixa ou 0
         oferta = orcamento_cliente
 
-    prazo_dias = proposal_cfg.get("prazo_dias", 7)
     texto = _build_texto(project, config, oferta, prazo_dias, full_description)
+
+    # Checagem final, INDEPENDENTE da origem do texto (IA já é checada dentro de
+    # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
+    # essa é a rede de segurança que garante que nem um template mal configurado consiga
+    # colocar contato/valor/prazo dentro do texto da proposta).
+    violation = ai_writer.check_text_safety(texto)
+    if violation:
+        log.warning(
+            "Texto final da proposta pra '%s' violou regra de segurança (%s) — usando "
+            "fallback mínimo genérico em vez disso. Confira o template 'texto' em config.yaml.",
+            project.get("title"),
+            violation,
+        )
+        texto = _SAFE_FALLBACK_TEXTO
 
     log.info("Proposta montada para '%s': oferta=R$%s, prazo=%sd", project.get("title"), oferta, prazo_dias)
 

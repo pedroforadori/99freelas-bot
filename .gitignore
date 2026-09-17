@@ -6,4 +6,7 @@ __pycache__/
 data/applied_jobs.json
 data/auth_state.json
 data/dry_run_seen.json
+data/connections.json
+data/pending_approvals.json
+data/telegram_offset.json
 logs/

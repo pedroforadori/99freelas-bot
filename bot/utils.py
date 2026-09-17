@@ -1,5 +1,7 @@
+import calendar
 import re
 import time
+from datetime import date
 
 
 def parse_currency(raw: str) -> float | None:
@@ -16,6 +18,17 @@ def parse_currency(raw: str) -> float | None:
 def format_currency_br(value: float) -> str:
     """Formata um float pro formato esperado por campos de valor do site: '1234,56' (vírgula decimal)."""
     return f"{value:.2f}".replace(".", ",")
+
+
+def daily_quota(monthly_quota: int) -> int:
+    """
+    Divide a cota mensal de propostas pelos dias do mês corrente, sem arredondar pra cima.
+    Vive aqui (não em main.py) pra notifier.py poder importar sem criar ciclo de import
+    (main.py já importa notifier.py).
+    """
+    today = date.today()
+    days_in_month = calendar.monthrange(today.year, today.month)[1]
+    return monthly_quota // days_in_month
 
 
 _RELATIVE_TIME_UNIT_MINUTES = {

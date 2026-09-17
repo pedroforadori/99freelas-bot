@@ -45,10 +45,9 @@ proposal:
   ia_model: "gemini-3.6-flash"   # ajuste conforme o provedor acima
 
   # Template fixo (usado quando texto_modo == "fixo", ou como fallback se a IA falhar).
-  # Variáveis disponíveis: {titulo}, {oferta}, {prazo_dias}
+  # Variável disponível: {titulo}. NUNCA inclua {oferta}/{prazo_dias} aqui — valor e prazo
+  # vão só nos campos próprios do formulário (#oferta/#duracao-estimada), nunca no texto.
   texto: |
     Olá! Tenho experiência relevante com {titulo} e gostaria de me candidatar a este projeto.
-
-    Minha oferta é de R$ {oferta}, com prazo estimado de {prazo_dias} dias corridos.
 
     Fico à disposição para conversarmos sobre os detalhes. Obrigado pela oportunidade!

@@ -8,6 +8,7 @@ filtro automático que rejeita e cai pro template fixo (config.yaml) se o texto 
 mesmo assim contiver e-mail, link, telefone ou valor/prazo — nunca confiamos só na
 instrução do modelo pra isso.
 """
+import json
 import os
 import re
 
@@ -38,9 +39,30 @@ _SYSTEM_PROMPT = (
     "- Responda APENAS com o texto da proposta, sem comentários extras."
 )
 
+_PRICE_SYSTEM_PROMPT = (
+    "Você sugere valor e prazo de proposta para projetos de freelancer no 99Freelas, em "
+    "português do Brasil. Contexto: não há dado de mercado disponível pra esse projeto "
+    "(nem orçamento do cliente, nem propostas concorrentes já enviadas), então a sugestão "
+    "precisa vir só da sua leitura da descrição do projeto.\n"
+    "Regras OBRIGATÓRIAS:\n"
+    "- O objetivo é MAXIMIZAR a chance de aceitação — sugira um valor BAIXO e competitivo "
+    "pro escopo descrito, não um 'valor justo de mercado'. Prazo agressivo mas realista "
+    "(rapidez também ajuda a converter).\n"
+    "- Calibre pela complexidade real do escopo descrito — um projeto simples merece um "
+    "valor claramente menor que um projeto grande, mesmo mirando baixo em ambos os casos.\n"
+    "- Responda APENAS com um objeto JSON válido, sem markdown, sem explicação, no formato "
+    'exato: {"oferta": <número>, "prazo_dias": <número inteiro>}. Nenhum texto antes ou depois.'
+)
 
-def _safety_violation(text: str) -> str | None:
-    """Retorna o motivo se o texto violar alguma regra de segurança, ou None se estiver OK."""
+
+def check_text_safety(text: str) -> str | None:
+    """
+    Retorna o motivo se o texto violar alguma regra de segurança, ou None se estiver OK.
+    Pública (sem `_`) porque proposal.py também usa isso como checagem final no texto que
+    vai pro formulário, seja ele gerado por IA ou vindo do template fixo em config.yaml —
+    nunca confiar só na instrução do prompt, nem só em "não esquecer" de configurar certo
+    o template fixo.
+    """
     if _EMAIL_PATTERN.search(text):
         return "contém um e-mail"
     if _URL_PATTERN.search(text):
@@ -63,7 +85,7 @@ def _build_user_prompt(project: dict, full_description: str, skills: list) -> st
     )
 
 
-def _generate_with_anthropic(user_prompt: str, model: str) -> str | None:
+def _generate_with_anthropic(user_prompt: str, model: str, system_prompt: str = _SYSTEM_PROMPT) -> str | None:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         log.warning("ANTHROPIC_API_KEY não configurada — não é possível gerar proposta via Anthropic.")
@@ -79,7 +101,7 @@ def _generate_with_anthropic(user_prompt: str, model: str) -> str | None:
         response = client.messages.create(
             model=model,
             max_tokens=600,
-            system=_SYSTEM_PROMPT,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
         return "".join(block.text for block in response.content if block.type == "text").strip()
@@ -88,7 +110,7 @@ def _generate_with_anthropic(user_prompt: str, model: str) -> str | None:
         return None
 
 
-def _generate_with_gemini(user_prompt: str, model: str) -> str | None:
+def _generate_with_gemini(user_prompt: str, model: str, system_prompt: str = _SYSTEM_PROMPT) -> str | None:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         log.warning("GEMINI_API_KEY não configurada — não é possível gerar proposta via Gemini.")
@@ -106,7 +128,7 @@ def _generate_with_gemini(user_prompt: str, model: str) -> str | None:
             model=model,
             contents=user_prompt,
             config=genai_types.GenerateContentConfig(
-                system_instruction=_SYSTEM_PROMPT,
+                system_instruction=system_prompt,
                 max_output_tokens=1200,
                 # Sem isso, modelos "thinking" (ex: gemini-3.6-flash) consomem o
                 # max_output_tokens inteiro com raciocínio interno e cortam o texto
@@ -148,9 +170,72 @@ def generate_proposal_text(project: dict, full_description: str, config: dict) -
         log.warning("IA (%s) retornou texto vazio ou falhou.", provider_name)
         return None
 
-    violation = _safety_violation(text)
+    violation = check_text_safety(text)
     if violation:
         log.warning("Texto gerado por IA rejeitado (%s) — caindo pro template fixo.", violation)
         return None
 
     return text
+
+
+_PRICE_MIN_SANITY = 20.0
+_PRICE_MAX_SANITY = 50000.0
+_PRAZO_MIN_SANITY = 1
+_PRAZO_MAX_SANITY = 90
+
+
+def _build_price_user_prompt(project: dict, full_description: str) -> str:
+    return (
+        f"Projeto: {project.get('title', '')}\n\n"
+        f"Descrição completa do projeto:\n{full_description}\n\n"
+        "Sugira oferta (R$) e prazo_dias seguindo todas as regras do system prompt."
+    )
+
+
+def suggest_price_and_deadline(project: dict, full_description: str, config: dict) -> tuple[float, int] | None:
+    """
+    Sugere (oferta, prazo_dias) via IA quando não há orçamento do cliente nem "menor
+    proposta"/média disponível pra basear o preço — ver proposal.build_proposal.
+
+    Retorna None se a API falhar, a resposta não for um JSON válido no formato esperado,
+    ou os valores caírem fora de uma faixa de sanidade ampla (não é um "piso de mercado",
+    só uma proteção contra erro grosseiro de parsing/unidade — por decisão do usuário, não
+    há piso mínimo configurado; ele quer que a IA julgue o valor coerente por projeto).
+    Tudo ou nada: o chamador NÃO deve tentar usar só uma das duas partes se a outra falhar.
+    """
+    proposal_cfg = config.get("proposal", {})
+    provider_name = proposal_cfg.get("ia_provider", "anthropic")
+    provider = _PROVIDERS.get(provider_name)
+    if not provider:
+        log.warning("ia_provider '%s' desconhecido (use 'anthropic' ou 'gemini').", provider_name)
+        return None
+
+    generate_fn, default_model = provider
+    model = proposal_cfg.get("ia_model", default_model)
+    user_prompt = _build_price_user_prompt(project, full_description)
+
+    raw = generate_fn(user_prompt, model, system_prompt=_PRICE_SYSTEM_PROMPT)
+    if not raw:
+        log.warning("IA (%s) não retornou sugestão de preço/prazo.", provider_name)
+        return None
+
+    # Alguns modelos ocasionalmente envolvem o JSON em ```json ... ``` mesmo pedindo pra não —
+    # tira as cercas de código se existirem, sem tentar reparar nada além disso.
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+    try:
+        data = json.loads(cleaned)
+        oferta = float(data["oferta"])
+        prazo_dias = int(data["prazo_dias"])
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log.warning("Resposta de preço/prazo da IA não é um JSON válido (%s): %r", e, raw[:200])
+        return None
+
+    if not (_PRICE_MIN_SANITY <= oferta <= _PRICE_MAX_SANITY):
+        log.warning("Oferta sugerida pela IA fora da faixa de sanidade: R$%s", oferta)
+        return None
+    if not (_PRAZO_MIN_SANITY <= prazo_dias <= _PRAZO_MAX_SANITY):
+        log.warning("Prazo sugerido pela IA fora da faixa de sanidade: %s dias", prazo_dias)
+        return None
+
+    return round(oferta, 2), prazo_dias
