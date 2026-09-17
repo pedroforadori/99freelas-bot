@@ -18,7 +18,6 @@ from bot.utils import daily_quota, format_currency_br
 log = get_logger(__name__)
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
-_TEXTO_PREVIEW_CHARS = 500
 _TELEGRAM_MSG_LIMIT = 4096
 
 _OFFSET_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "telegram_offset.json")
@@ -217,10 +216,6 @@ def notify_proposal_result(
         linhas.append(linha_conexoes)
 
     linhas.append(f"<b>Detalhe:</b> {detail}")
-    if proposal and status == "sent":
-        texto = proposal["texto"]
-        preview = texto if len(texto) <= _TEXTO_PREVIEW_CHARS else texto[:_TEXTO_PREVIEW_CHARS] + "…"
-        linhas.append(f"\n<b>Texto enviado:</b>\n{preview}")
 
     _send_telegram("\n".join(linhas))
 
