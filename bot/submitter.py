@@ -173,6 +173,16 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         page.wait_for_selector(sel.PROPOSAL_SUCCESS_MARKER, timeout=8000)
         return _finish(project, proposal, True, "proposta enviada com sucesso")
     except PlaywrightTimeoutError as e:
+        # A navegação pós-envio pode ter completado de fato (dom/load disparados) mesmo
+        # sem atingir "networkidle" a tempo (ex: script de analytics/chat mantendo
+        # requisição em aberto) — nesse caso o clique já confirmou o envio no servidor e
+        # declarar falha aqui seria um falso negativo (confirmado em produção: proposta
+        # enviada de verdade no site, bot reportou erro). Só checagem de presença
+        # (query_selector), nunca clique, mesmo padrão do marcador de Premium acima.
+        if page.query_selector(sel.PROPOSAL_SUCCESS_MARKER):
+            return _finish(
+                project, proposal, True, "proposta enviada com sucesso (confirmado após timeout de networkidle)"
+            )
         return _finish(
             project, proposal, False, f"timeout ao preencher/enviar formulário de proposta: {e}", simulated=dry_run
         )
