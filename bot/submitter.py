@@ -102,11 +102,16 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
         with page.expect_navigation(wait_until="networkidle", timeout=8000):
             page.click(sel.PROPOSAL_BUTTON, timeout=8000)
     except PlaywrightTimeoutError:
-        # Só checa o marcador de Premium se o clique real falhou — confirmado que, com o
-        # plano ativo, "Ver plano" (PROPOSAL_PREMIUM_REQUIRED_MARKER) pode aparecer na
-        # página AO MESMO TEMPO que o botão "Enviar proposta" de verdade (parece ser um
-        # banner promocional genérico, não mais um bloqueio). Checar esse marcador ANTES
-        # de tentar clicar (como era antes) dava falso positivo em toda proposta.
+        # Confirmado em produção (2026-09-18, projeto 785336): o marcador de Premium
+        # ("Ver plano") pode estar presente MESMO quando o botão real também está —
+        # não é um sinal confiável de bloqueio por si só, é um banner promocional
+        # genérico (ver nota em site_selectors.py). Um timeout de clique por qualquer
+        # outro motivo (rede lenta, elemento coberto, etc.) caía nesse ramo e era
+        # erroneamente relatado como "requer Premium". Corrigido: só trata como
+        # bloqueio de Premium quando o botão real (PROPOSAL_BUTTON) de fato NÃO existe
+        # na página — checagem por presença, nunca clique, mesmo padrão de sempre.
+        if page.query_selector(sel.PROPOSAL_BUTTON):
+            return None, "clique em 'Enviar proposta' expirou mas o botão ainda existe na página (tentar de novo)"
         if page.query_selector(sel.PROPOSAL_PREMIUM_REQUIRED_MARKER):
             return None, "requer plano Freelancer Premium ativo pra propor nesse projeto"
         return None, "botão 'Enviar proposta' não encontrado (projeto pode ter fechado)"
@@ -142,8 +147,17 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         with page.expect_navigation(wait_until="networkidle", timeout=8000):
             page.click(sel.PROPOSAL_BUTTON, timeout=8000)
     except PlaywrightTimeoutError:
-        # Ver comentário equivalente em prepare_proposal: só checa o marcador de Premium
-        # depois que o clique real falhou, nunca antes — pode coexistir com o botão real.
+        # Ver comentário equivalente em prepare_proposal: o marcador de Premium pode
+        # coexistir com o botão real, então só é sinal confiável de bloqueio quando o
+        # botão real de fato não está mais na página.
+        if page.query_selector(sel.PROPOSAL_BUTTON):
+            return _finish(
+                project,
+                None,
+                False,
+                "clique em 'Enviar proposta' expirou mas o botão ainda existe na página (tentar de novo)",
+                simulated=dry_run,
+            )
         if page.query_selector(sel.PROPOSAL_PREMIUM_REQUIRED_MARKER):
             return _finish(
                 project, None, False, "requer plano Freelancer Premium ativo pra propor nesse projeto", simulated=dry_run
