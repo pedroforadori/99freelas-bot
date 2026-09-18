@@ -66,7 +66,11 @@ def refresh(page) -> dict | None:
     connections.refresh.
     """
     try:
-        page.goto(sel.DASHBOARD_URL, wait_until="networkidle")
+        # "load" em vez de "networkidle": mesmo timeout intermitente confirmado em
+        # connections.py (produção, 2026-09-18) — nesta sessão, 6/6 checagens de
+        # mensagens falharam por timeout de networkidle em /dashboard, então a
+        # notificação de mensagens novas nunca chegou a funcionar de fato até este fix.
+        page.goto(sel.DASHBOARD_URL, wait_until="load")
         data = {
             "unread_count": _read_unread_count(page),
             "fetched_at": datetime.utcnow().isoformat(),

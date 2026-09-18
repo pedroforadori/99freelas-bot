@@ -60,7 +60,12 @@ def refresh(page) -> dict | None:
     notifier.py: isso nunca pode quebrar o bot.
     """
     try:
-        page.goto(sel.DASHBOARD_URL, wait_until="networkidle")
+        # "load" em vez de "networkidle": confirmado em produção (2026-09-18) que
+        # /dashboard mantém alguma requisição de fundo aberta que às vezes nunca
+        # "acalma" dentro do timeout padrão de 30s (mesmo padrão já visto na página de
+        # envio de proposta, ver CLAUDE.md), causando timeout mesmo com o conteúdo já
+        # pronto pra ler. O texto extraído abaixo não depende de rede ociosa, só do DOM.
+        page.goto(sel.DASHBOARD_URL, wait_until="load")
         texto = page.inner_text("body")
 
         plano_match = _PLANO_PATTERN.search(texto)
