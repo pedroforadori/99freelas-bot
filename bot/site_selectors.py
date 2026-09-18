@@ -72,7 +72,7 @@ PROPOSAL_PREMIUM_REQUIRED_MARKER = "a[href='/freelancer-premium']"
 # projetos bem recentes (o alvo do nosso filtro de idade) costuma estar ausente; nesse
 # caso _read_lowest_bid retorna None e build_proposal cai pro fallback normal.
 PROPOSAL_LOWEST_BID = ".generic.information"
-PROPOSAL_OFERTA_INPUT = "#oferta"
+PROPOSAL_OFERTA_INPUT = "#oferta-final"
 PROPOSAL_PRAZO_INPUT = "#duracao-estimada"
 PROPOSAL_DETALHES_TEXTAREA = "#proposta"
 PROPOSAL_SUBMIT_BUTTON = "#btnConcluirEnvioProposta"
