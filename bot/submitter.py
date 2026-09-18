@@ -112,6 +112,8 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
         # na página — checagem por presença, nunca clique, mesmo padrão de sempre.
         if page.query_selector(sel.PROPOSAL_BUTTON):
             return None, "clique em 'Enviar proposta' expirou mas o botão ainda existe na página (tentar de novo)"
+        if page.query_selector(sel.PROJECT_CLOSED_MARKER):
+            return None, "projeto foi fechado"
         if page.query_selector(sel.PROPOSAL_PREMIUM_REQUIRED_MARKER):
             return None, "requer plano Freelancer Premium ativo pra propor nesse projeto"
         return None, "botão 'Enviar proposta' não encontrado (projeto pode ter fechado)"
@@ -158,6 +160,8 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
                 "clique em 'Enviar proposta' expirou mas o botão ainda existe na página (tentar de novo)",
                 simulated=dry_run,
             )
+        if page.query_selector(sel.PROJECT_CLOSED_MARKER):
+            return _finish(project, None, False, "projeto foi fechado", simulated=dry_run)
         if page.query_selector(sel.PROPOSAL_PREMIUM_REQUIRED_MARKER):
             return _finish(
                 project, None, False, "requer plano Freelancer Premium ativo pra propor nesse projeto", simulated=dry_run

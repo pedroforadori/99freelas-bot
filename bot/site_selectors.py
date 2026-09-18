@@ -72,6 +72,12 @@ PROPOSAL_BUTTON = "a.clickable:has-text('Enviar proposta')"
 # da listagem, mesmo com conexões disponíveis. Checar isso ANTES de tentar clicar em
 # PROPOSAL_BUTTON evita timeout e dá um motivo de falha claro em vez de "botão não encontrado".
 PROPOSAL_PREMIUM_REQUIRED_MARKER = "a[href='/freelancer-premium']"
+# Confirmado em produção (2026-09-18, projeto 785365): quando o projeto fecha entre o
+# preparo da proposta (scraping) e a aprovação no Telegram (espera indefinida),
+# PROPOSAL_BUTTON some da página assim como acontece com o bloqueio de Premium — sem
+# esse marcador, finalize_submission caía erroneamente no motivo "requer Premium".
+# HTML real: <button class="btn status-11">Fechado</button>
+PROJECT_CLOSED_MARKER = "button.status-11"
 # Confirmado: bloco com "Valor médio das propostas" e "Duração média estimada" (não o
 # menor valor — só a média está disponível sem Premium), dentro da página de envio
 # (/project/bid/..., depois de clicar em PROPOSAL_BUTTON). Ex real:
