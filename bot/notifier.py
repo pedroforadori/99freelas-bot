@@ -7,13 +7,14 @@ ciclo do bot nem impedir o registro da proposta em storage.py.
 """
 import json
 import os
+import re
 
 import requests
 
 from bot import approvals, connections, storage
 from bot.logger_setup import get_logger
 from bot.proposal import ORIGEM_LABELS
-from bot.utils import daily_quota, format_currency_br
+from bot.utils import daily_quota, format_currency_br, parse_currency
 
 log = get_logger(__name__)
 
@@ -163,7 +164,7 @@ def _origem_line(proposal: dict) -> str | None:
     propostas concorrentes, orçamento do cliente ou valor fixo — ver
     proposal.ORIGEM_LABELS). Retorna None se a proposta não tiver esse campo (propostas
     pendentes montadas antes dessa mudança, já persistidas em data/pending_approvals.json).
-    Se o valor/prazo foi ajustado manualmente pelos botões ➖/➕ (ver notifier._handle_adjust),
+    Se o valor/prazo foi ajustado manualmente por texto livre (ver notifier._handle_edit_reply),
     isso é sinalizado à parte, já que a origem original deixa de refletir o valor exibido.
     """
     origem = proposal.get("origem_valor")
@@ -222,24 +223,17 @@ def notify_proposal_result(
 
 # --- Fluxo de aprovação (substitui o envio 100% automático em main.py) ---
 #
-# send_approval_request manda a proposta completa com botões inline de ajuste (oferta/
-# prazo) e "Aprovar"/"Rejeitar". poll_decisions faz short-poll (getUpdates timeout=0 —
-# nunca long-poll, bloquearia a única thread do bot) e grava a decisão em approvals.py
+# send_approval_request manda a proposta completa com botões inline de edição (oferta/
+# prazo, por texto livre — ver _handle_edit_request/_handle_edit_reply) e
+# "Aprovar"/"Rejeitar". poll_decisions faz short-poll (getUpdates timeout=0 — nunca
+# long-poll, bloquearia a única thread do bot) e grava a decisão em approvals.py
 # IMEDIATAMENTE ao receber o clique de aprovar/rejeitar, antes de qualquer coisa no
 # Playwright — isso é o que garante que uma decisão nunca se perde mesmo se o processo
 # cair logo depois. finalize_approval_message troca só o teclado da mensagem original
 # (nunca o texto) pra mostrar o resultado FINAL, mantendo a descrição/proposta completas
-# visíveis no histórico do chat — diferente de um ajuste de oferta/prazo (ver
-# _handle_adjust), que edita o texto da mensagem (ainda não há decisão final) pra
+# visíveis no histórico do chat — diferente de uma edição de oferta/prazo (ver
+# _handle_edit_reply), que edita o texto da mensagem (ainda não há decisão final) pra
 # refletir o valor/prazo atualizado.
-
-
-def _oferta_step_reais() -> float:
-    return float(os.environ.get("APPROVAL_OFERTA_STEP_REAIS", 10))
-
-
-def _prazo_step_dias() -> int:
-    return int(os.environ.get("APPROVAL_PRAZO_STEP_DIAS", 1))
 
 
 def _approval_text(project: dict, proposal: dict) -> str:
@@ -268,24 +262,17 @@ def _approval_text(project: dict, proposal: dict) -> str:
 
 def _approval_keyboard(project_id: str) -> dict:
     """
-    Teclado da mensagem de aprovação: uma linha de ajuste de oferta, uma de prazo (botões
-    de incremento/decremento em passos fixos — APPROVAL_OFERTA_STEP_REAIS/
-    APPROVAL_PRAZO_STEP_DIAS no .env — em vez de texto livre, pra não precisar parsear
-    resposta de usuário nem correlacionar reply) e a linha final de decisão.
-    callback_data = "adj:<o|p>:<+|->:<project_id>" pros ajustes, formato compacto o
-    bastante pro limite de 64 bytes do Telegram mesmo com o project_id.
+    Teclado da mensagem de aprovação: uma linha com um botão de editar oferta e um de
+    editar prazo (cada um dispara um prompt de resposta livre via force_reply — ver
+    _handle_edit_request) e a linha final de decisão. callback_data =
+    "editf:<o|p>:<project_id>" pros pedidos de edição, formato compacto o bastante pro
+    limite de 64 bytes do Telegram mesmo com o project_id.
     """
-    step_oferta = format_currency_br(_oferta_step_reais())
-    step_prazo = _prazo_step_dias()
     return {
         "inline_keyboard": [
             [
-                {"text": f"➖ R$ {step_oferta}", "callback_data": f"adj:o:-:{project_id}"},
-                {"text": f"➕ R$ {step_oferta}", "callback_data": f"adj:o:+:{project_id}"},
-            ],
-            [
-                {"text": f"➖ {step_prazo}d prazo", "callback_data": f"adj:p:-:{project_id}"},
-                {"text": f"➕ {step_prazo}d prazo", "callback_data": f"adj:p:+:{project_id}"},
+                {"text": "✏️ Editar oferta", "callback_data": f"editf:o:{project_id}"},
+                {"text": "✏️ Editar prazo", "callback_data": f"editf:p:{project_id}"},
             ],
             [
                 {"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"},
@@ -298,9 +285,10 @@ def _approval_keyboard(project_id: str) -> dict:
 def send_approval_request(project: dict, proposal: dict) -> int | None:
     """
     Manda a proposta completa (descrição do projeto + texto gerado + valor + prazo) pro
-    Telegram com botões de ajuste de oferta/prazo e "Aprovar"/"Rejeitar". Retorna o
-    message_id (reaproveitado tanto por ajustes — editMessageText, ver _handle_adjust —
-    quanto pelo resultado final via finalize_approval_message), ou None se o envio falhar.
+    Telegram com botões de editar oferta/prazo e "Aprovar"/"Rejeitar". Retorna o
+    message_id (reaproveitado tanto por edições — editMessageText, ver
+    _handle_edit_reply — quanto pelo resultado final via finalize_approval_message), ou
+    None se o envio falhar.
     """
     project_id = project["id"]
     result = _telegram_call(
@@ -361,37 +349,112 @@ def _answer_callback(callback_id: str, text: str = "") -> None:
     _telegram_call("answerCallbackQuery", payload)
 
 
-def _handle_adjust(callback_id: str, message_id: int | None, field: str, sign: str, project_id: str) -> None:
+_EDIT_PROMPTS = {
+    "o": "Digite a nova oferta em R$ (ex: 150 ou 150,00):",
+    "p": "Digite o novo prazo em dias (ex: 5):",
+}
+
+
+def _handle_edit_request(callback_id: str, field: str, project_id: str) -> None:
     """
-    Aplica um passo de ajuste (oferta ou prazo) na proposta AINDA pendente. Lido/gravado
-    via approvals.get_pending/update_proposal, que recusa o ajuste se a decisão já tiver
-    sido tomada nesse meio-tempo (aprovar/rejeitar tem prioridade — evita reabrir uma
-    proposta que já está em processamento). Reflete o novo valor editando o TEXTO da
-    mensagem original (diferente de finalize_approval_message, que nunca edita o texto —
-    aqui ainda não há decisão final, então mostrar o valor atualizado é o ponto).
+    Clique em "✏️ Editar oferta/prazo": manda uma mensagem NOVA (não edita a original)
+    com force_reply pedindo o novo valor em texto livre. O message_id dessa pergunta é
+    gravado em approvals.set_pending_edit — quando a resposta chegar (reply_to_message
+    aponta pra ela), _handle_edit_reply correlaciona de volta ao project_id/field sem
+    precisar adivinhar a qual proposta pendente o texto se refere (não dá pra assumir só
+    uma edição em voo por vez — pode haver várias propostas pendentes ao mesmo tempo).
     """
     entry = approvals.get_pending(project_id)
     if entry is None or entry["decision"] is not None:
-        _answer_callback(callback_id, "Já decidido ou expirado — não é possível ajustar.")
+        _answer_callback(callback_id, "Já decidido ou expirado — não é possível editar.")
         return
 
-    proposal = dict(entry["proposal"])
-    proposal["ajustado_manualmente"] = True
-    delta = 1 if sign == "+" else -1
-    if field == "o":
-        proposal["oferta"] = max(0.0, round(proposal["oferta"] + delta * _oferta_step_reais(), 2))
-        ack = f"Oferta: R$ {format_currency_br(proposal['oferta'])}"
-    elif field == "p":
-        proposal["prazo_dias"] = max(1, proposal["prazo_dias"] + delta * _prazo_step_dias())
-        ack = f"Prazo: {proposal['prazo_dias']} dias"
-    else:
+    prompt = _EDIT_PROMPTS.get(field)
+    if not prompt:
         _answer_callback(callback_id)
         return
 
-    if not approvals.update_proposal(project_id, proposal):
-        _answer_callback(callback_id, "Já decidido ou expirado — não é possível ajustar.")
+    titulo = entry["project"].get("title", "")
+    result = _telegram_call(
+        "sendMessage",
+        {
+            "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
+            "text": f"{prompt}\n<i>{titulo}</i>",
+            "parse_mode": "HTML",
+            "reply_markup": {"force_reply": True, "selective": True},
+        },
+    )
+    prompt_message_id = result.get("message_id") if isinstance(result, dict) else None
+    if not prompt_message_id or not approvals.set_pending_edit(project_id, field, prompt_message_id):
+        _answer_callback(callback_id, "Não foi possível iniciar a edição — tente de novo.")
         return
 
+    _answer_callback(callback_id)
+
+
+def _parse_oferta_reply(raw: str) -> float | None:
+    valor = parse_currency(raw)
+    if valor is None or valor < 0:
+        return None
+    return round(valor, 2)
+
+
+def _parse_prazo_reply(raw: str) -> int | None:
+    match = re.search(r"\d+", raw or "")
+    if not match:
+        return None
+    valor = int(match.group())
+    return valor if valor >= 1 else None
+
+
+def _handle_edit_reply(message: dict) -> None:
+    """
+    Trata uma resposta de texto livre a um prompt de edição (force_reply, ver
+    _handle_edit_request). Só age se reply_to_message apontar pro message_id de algum
+    pending_edit ainda em aberto (approvals.find_by_prompt_message_id) — qualquer outra
+    mensagem no chat (conversa normal, reply a outra coisa) é ignorada sem nenhum aviso.
+    Em caso de valor inválido, avisa e mantém o pending_edit ativo pra deixar o usuário
+    tentar de novo respondendo à mesma mensagem.
+    """
+    reply_to = message.get("reply_to_message")
+    if not reply_to:
+        return
+    found = approvals.find_by_prompt_message_id(reply_to["message_id"])
+    if not found:
+        return
+    project_id, field = found
+
+    entry = approvals.get_pending(project_id)
+    if entry is None or entry["decision"] is not None:
+        _send_telegram("Essa proposta já foi decidida (ou não existe mais) — edição ignorada.")
+        return
+
+    raw_text = message.get("text", "")
+    proposal = dict(entry["proposal"])
+    if field == "o":
+        novo = _parse_oferta_reply(raw_text)
+        if novo is None:
+            _send_telegram("Não entendi o valor. Responda de novo à mensagem anterior com a nova oferta em R$.")
+            return
+        proposal["oferta"] = novo
+        ack = f"Oferta atualizada: R$ {format_currency_br(novo)}"
+    elif field == "p":
+        novo = _parse_prazo_reply(raw_text)
+        if novo is None:
+            _send_telegram("Não entendi o prazo. Responda de novo à mensagem anterior com o novo prazo em dias.")
+            return
+        proposal["prazo_dias"] = novo
+        ack = f"Prazo atualizado: {novo} dias"
+    else:
+        return
+
+    proposal["ajustado_manualmente"] = True
+    if not approvals.update_proposal(project_id, proposal):
+        _send_telegram("Essa proposta já foi decidida (ou não existe mais) — edição ignorada.")
+        return
+    approvals.clear_pending_edit(project_id)
+
+    message_id = entry.get("telegram_message_id")
     if message_id:
         _telegram_call(
             "editMessageText",
@@ -404,7 +467,7 @@ def _handle_adjust(callback_id: str, message_id: int | None, field: str, sign: s
                 "reply_markup": _approval_keyboard(project_id),
             },
         )
-    _answer_callback(callback_id, ack)
+    _send_telegram(ack)
 
 
 def _handle_callback(callback: dict) -> None:
@@ -414,9 +477,9 @@ def _handle_callback(callback: dict) -> None:
 
     parts = data_str.split(":")
 
-    if parts[0] == "adj" and len(parts) == 4:
-        _, field, sign, project_id = parts
-        _handle_adjust(callback_id, message_id, field, sign, project_id)
+    if parts[0] == "editf" and len(parts) == 3:
+        _, field, project_id = parts
+        _handle_edit_request(callback_id, field, project_id)
         return
 
     if len(parts) != 2 or parts[0] not in ("approve", "reject"):
@@ -454,10 +517,11 @@ def _handle_callback(callback: dict) -> None:
 def poll_decisions() -> None:
     """
     Short-poll (timeout=0 — nunca o long-poll nativo do Telegram, que bloquearia a única
-    thread do bot) por cliques novos nos botões Aprovar/Rejeitar. Usa um offset persistido
-    em data/telegram_offset.json pra nunca reprocessar o mesmo clique entre reinícios.
-    Chamada com frequência própria (APPROVAL_POLL_INTERVAL_SECONDS) em main.py, separada
-    do ciclo de scraping — ver loop em main.main().
+    thread do bot) por cliques novos nos botões Aprovar/Rejeitar/Editar e por respostas de
+    texto livre a um prompt de edição (ver _handle_edit_request/_handle_edit_reply). Usa
+    um offset persistido em data/telegram_offset.json pra nunca reprocessar o mesmo
+    update entre reinícios. Chamada com frequência própria (APPROVAL_POLL_INTERVAL_SECONDS)
+    em main.py, separada do ciclo de scraping — ver loop em main.main().
     """
     offset = _load_offset()
     updates = _telegram_call("getUpdates", {"offset": offset, "timeout": 0})
@@ -470,6 +534,10 @@ def poll_decisions() -> None:
         callback = update.get("callback_query")
         if callback:
             _handle_callback(callback)
+            continue
+        message = update.get("message")
+        if message:
+            _handle_edit_reply(message)
 
     if max_update_id >= offset:
         _save_offset(max_update_id + 1)
