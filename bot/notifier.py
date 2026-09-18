@@ -12,6 +12,7 @@ import re
 import requests
 
 from bot import ai_writer, approvals, connections, storage
+from bot import site_selectors as sel
 from bot.logger_setup import get_logger
 from bot.proposal import ORIGEM_LABELS
 from bot.utils import daily_quota, format_currency_br, parse_currency
@@ -109,6 +110,22 @@ def notify_bot_status(event: str, detail: str = "", simulated: bool = False) -> 
     if detail:
         linhas.append(detail)
 
+    _send_telegram("\n".join(linhas))
+
+
+def notify_new_messages(unread_count: int, previous_count: int) -> None:
+    """
+    Notifica quando o contador de mensagens não lidas do 99Freelas (badge do header, ver
+    bot/messages.py) AUMENTA em relação ao último valor conhecido — alerta quase em tempo
+    real de resposta de cliente, já que a notificação nativa do site é lenta/não confiável.
+    Só chamada por messages.check_and_notify quando há aumento de verdade; uma queda ou
+    igualdade nunca chega aqui, então esta função não precisa checar isso de novo.
+    """
+    linhas = [
+        "📩 <b>Novas mensagens no 99Freelas</b>",
+        f"Não lidas: {unread_count} (antes: {previous_count})",
+        f'<a href="{sel.DASHBOARD_URL}">Ver no site</a>',
+    ]
     _send_telegram("\n".join(linhas))
 
 

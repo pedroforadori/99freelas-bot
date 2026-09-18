@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # permite `python bot/main.py`
 
-from bot import approvals, connections, notifier, scraper, submitter
+from bot import approvals, connections, messages, notifier, scraper, submitter
 from bot import site_selectors as sel
 from bot.filter import is_match
 from bot.logger_setup import get_logger
@@ -210,6 +210,7 @@ def main() -> None:
     interval_max = int(os.environ.get("CHECK_INTERVAL_MAX_SECONDS", 420))
     monthly_quota = int(os.environ.get("MONTHLY_PROPOSAL_QUOTA", 240))
     approval_poll_interval = int(os.environ.get("APPROVAL_POLL_INTERVAL_SECONDS", 20))
+    messages_poll_interval = int(os.environ.get("MESSAGES_POLL_INTERVAL_SECONDS", 60))
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless)
@@ -222,6 +223,7 @@ def main() -> None:
         log.info("Bot iniciado. Ctrl+C para parar.")
         notifier.notify_bot_status("started")
         consecutive_errors = 0
+        next_messages_check_at = 0  # força checar mensagens já na primeira iteração do loop interno
         try:
             while True:
                 try:
@@ -254,12 +256,20 @@ def main() -> None:
                     try:
                         notifier.poll_decisions(config)
                         process_pending_approvals(page, config, monthly_quota)
+                        # Checagem de mensagens não lidas usa a própria cadência
+                        # (MESSAGES_POLL_INTERVAL_SECONDS), mais espaçada que o polling de
+                        # aprovações — cada checagem navega até /dashboard (messages.refresh),
+                        # rodar isso a cada APPROVAL_POLL_INTERVAL_SECONDS (20s) geraria
+                        # navegações demais.
+                        if time.time() >= next_messages_check_at:
+                            messages.check_and_notify(page)
+                            next_messages_check_at = time.time() + messages_poll_interval
                     except Exception as e:
                         # Erros aqui ficam só no log — categoria de falha diferente da do
                         # ciclo de scraping (polling do Telegram), não entra no contador
                         # consecutive_errors nem gera notify_bot_status próprio, pra não
                         # duplicar/confundir com os eventos de ciclo de vida já existentes.
-                        log.exception("Erro ao processar aprovações pendentes: %s", e)
+                        log.exception("Erro ao processar aprovações pendentes/mensagens: %s", e)
                     time.sleep(approval_poll_interval)
         except KeyboardInterrupt:
             log.info("Interrompido (Ctrl+C ou parada do container).")

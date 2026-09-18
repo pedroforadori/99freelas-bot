@@ -12,6 +12,15 @@ aqui. Centralizar aqui evita ter que caçar seletores espalhados pelo código.
 # --- Dashboard (saldo de conexões) ---
 DASHBOARD_URL = "https://www.99freelas.com.br/dashboard"
 
+# --- Mensagens (badge de não lidas, header) ---
+# Confirmado contra HTML real (fornecido pelo usuário): badge no header do site, presente
+# em qualquer página autenticada (ex: a própria /dashboard, já visitada 1x por ciclo por
+# connections.refresh — reaproveitada aqui, sem precisar de uma URL de mensagens própria).
+# A classe "show" só é adicionada quando há mensagens não lidas; sem ela, tratar como 0.
+# Ex real: <div class="box-mensagem-count count show"><span class="count-value">1</span></div>
+MESSAGES_BADGE_CONTAINER = "div.box-mensagem-count"
+MESSAGES_BADGE_VALUE = "div.box-mensagem-count .count-value"
+
 # --- Login ---
 LOGIN_URL = "https://www.99freelas.com.br/login"
 LOGIN_EMAIL_INPUT = "#email"

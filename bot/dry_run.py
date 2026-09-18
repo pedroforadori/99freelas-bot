@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from bot import connections, notifier, scraper, submitter
+from bot import connections, messages, notifier, scraper, submitter
 from bot.filter import is_match
 from bot.logger_setup import get_logger
 from bot.main import load_config, open_authenticated_page
@@ -53,6 +53,10 @@ def run_cycle(page, config: dict, seen: set) -> None:
     # Mesmo em simulação, mantém o cache de connections.py atualizado — assim as
     # notificações de dry run já mostram o contador real "Conexões usadas: X/Y".
     connections.refresh(page)
+
+    # Também checa mensagens não lidas em modo de simulação — é só leitura, não interage
+    # com nada, então não tem motivo pra ficar de fora do dry run.
+    messages.check_and_notify(page)
 
     projects = scraper.fetch_open_projects(page)
     new_projects = [p for p in projects if p["id"] not in seen]
