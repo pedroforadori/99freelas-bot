@@ -11,7 +11,7 @@ import re
 
 import requests
 
-from bot import approvals, connections, storage
+from bot import ai_writer, approvals, connections, storage
 from bot.logger_setup import get_logger
 from bot.proposal import ORIGEM_LABELS
 from bot.utils import daily_quota, format_currency_br, parse_currency
@@ -246,6 +246,11 @@ def _approval_text(project: dict, proposal: dict) -> str:
     origem_line = _origem_line(proposal)
     if origem_line:
         valores += f"{origem_line}\n"
+    if proposal.get("texto_ia_falhou"):
+        valores += (
+            "⚠️ <b>A IA falhou ao gerar o texto</b> — abaixo está o template fixo de "
+            "config.yaml. Use o botão 🔄 pra tentar gerar via IA de novo, ou aprove assim mesmo.\n"
+        )
     texto_proposta = proposal["texto"]
     descricao = proposal.get("full_description") or project.get("description") or ""
 
@@ -260,26 +265,29 @@ def _approval_text(project: dict, proposal: dict) -> str:
     return f"{cabecalho}{valores}\n<b>Descrição do projeto:</b>\n{descricao}\n\n<b>Proposta:</b>\n{texto_proposta}"
 
 
-def _approval_keyboard(project_id: str) -> dict:
+def _approval_keyboard(project_id: str, texto_ia_falhou: bool = False) -> dict:
     """
     Teclado da mensagem de aprovação: uma linha com um botão de editar oferta e um de
     editar prazo (cada um dispara um prompt de resposta livre via force_reply — ver
-    _handle_edit_request) e a linha final de decisão. callback_data =
-    "editf:<o|p>:<project_id>" pros pedidos de edição, formato compacto o bastante pro
-    limite de 64 bytes do Telegram mesmo com o project_id.
+    _handle_edit_request), opcionalmente uma linha com "🔄 Tentar gerar via IA novamente"
+    (só quando proposal["texto_ia_falhou"] for True — ver proposal._build_texto) e a linha
+    final de decisão. callback_data = "editf:<o|p>:<project_id>" pros pedidos de edição e
+    "retryia:<project_id>" pro reenvio à IA, formato compacto o bastante pro limite de 64
+    bytes do Telegram mesmo com o project_id.
     """
-    return {
-        "inline_keyboard": [
-            [
-                {"text": "✏️ Editar oferta", "callback_data": f"editf:o:{project_id}"},
-                {"text": "✏️ Editar prazo", "callback_data": f"editf:p:{project_id}"},
-            ],
-            [
-                {"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"},
-                {"text": "❌ Rejeitar", "callback_data": f"reject:{project_id}"},
-            ],
-        ]
-    }
+    keyboard = [
+        [
+            {"text": "✏️ Editar oferta", "callback_data": f"editf:o:{project_id}"},
+            {"text": "✏️ Editar prazo", "callback_data": f"editf:p:{project_id}"},
+        ],
+    ]
+    if texto_ia_falhou:
+        keyboard.append([{"text": "🔄 Tentar gerar texto via IA novamente", "callback_data": f"retryia:{project_id}"}])
+    keyboard.append([
+        {"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"},
+        {"text": "❌ Rejeitar", "callback_data": f"reject:{project_id}"},
+    ])
+    return {"inline_keyboard": keyboard}
 
 
 def send_approval_request(project: dict, proposal: dict) -> int | None:
@@ -298,7 +306,7 @@ def send_approval_request(project: dict, proposal: dict) -> int | None:
             "text": _approval_text(project, proposal),
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
-            "reply_markup": _approval_keyboard(project_id),
+            "reply_markup": _approval_keyboard(project_id, proposal.get("texto_ia_falhou", False)),
         },
     )
     if not isinstance(result, dict):
@@ -464,13 +472,63 @@ def _handle_edit_reply(message: dict) -> None:
                 "text": _approval_text(entry["project"], proposal),
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
-                "reply_markup": _approval_keyboard(project_id),
+                "reply_markup": _approval_keyboard(project_id, proposal.get("texto_ia_falhou", False)),
             },
         )
     _send_telegram(ack)
 
 
-def _handle_callback(callback: dict) -> None:
+def _handle_retry_ia_text(callback_id: str, project_id: str, config: dict) -> None:
+    """
+    Clique em "🔄 Tentar gerar texto via IA novamente" (só aparece quando
+    proposal["texto_ia_falhou"] é True — ver proposal._build_texto/_approval_keyboard).
+    Chama ai_writer.generate_proposal_text de novo com a MESMA full_description já salva
+    na proposta pendente (lida da página do projeto no momento do preparo — não navega de
+    novo no Playwright, só chama a IA), e, em caso de sucesso, substitui o texto e edita a
+    mensagem de aprovação pra refletir o novo texto e sumir com o botão de retry. Em caso
+    de falha de novo, só avisa por cima do próprio clique (toast do Telegram via
+    answerCallbackQuery) — a mensagem de aprovação continua igual, ainda com o botão pra
+    tentar de novo depois.
+    """
+    entry = approvals.get_pending(project_id)
+    if entry is None or entry["decision"] is not None:
+        _answer_callback(callback_id, "Já decidido ou expirado — não é possível gerar de novo.")
+        return
+
+    proposal = dict(entry["proposal"])
+    full_description = proposal.get("full_description")
+    if not full_description:
+        _answer_callback(callback_id, "Sem descrição completa salva desse projeto — não é possível gerar via IA.")
+        return
+
+    texto = ai_writer.generate_proposal_text(entry["project"], full_description, config)
+    if not texto:
+        _answer_callback(callback_id, "IA falhou de novo. Tente mais tarde ou aprove com o texto atual.")
+        return
+
+    proposal["texto"] = texto
+    proposal["texto_ia_falhou"] = False
+    if not approvals.update_proposal(project_id, proposal):
+        _answer_callback(callback_id, "Já decidido ou expirado — não é possível gerar de novo.")
+        return
+
+    message_id = entry.get("telegram_message_id")
+    if message_id:
+        _telegram_call(
+            "editMessageText",
+            {
+                "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
+                "message_id": message_id,
+                "text": _approval_text(entry["project"], proposal),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+                "reply_markup": _approval_keyboard(project_id, False),
+            },
+        )
+    _answer_callback(callback_id, "Novo texto gerado ✅")
+
+
+def _handle_callback(callback: dict, config: dict) -> None:
     callback_id = callback["id"]
     data_str = callback.get("data", "")
     message_id = callback.get("message", {}).get("message_id")
@@ -480,6 +538,11 @@ def _handle_callback(callback: dict) -> None:
     if parts[0] == "editf" and len(parts) == 3:
         _, field, project_id = parts
         _handle_edit_request(callback_id, field, project_id)
+        return
+
+    if parts[0] == "retryia" and len(parts) == 2:
+        _, project_id = parts
+        _handle_retry_ia_text(callback_id, project_id, config)
         return
 
     if len(parts) != 2 or parts[0] not in ("approve", "reject"):
@@ -514,14 +577,16 @@ def _handle_callback(callback: dict) -> None:
     _answer_callback(callback_id, ack)
 
 
-def poll_decisions() -> None:
+def poll_decisions(config: dict) -> None:
     """
     Short-poll (timeout=0 — nunca o long-poll nativo do Telegram, que bloquearia a única
-    thread do bot) por cliques novos nos botões Aprovar/Rejeitar/Editar e por respostas de
-    texto livre a um prompt de edição (ver _handle_edit_request/_handle_edit_reply). Usa
-    um offset persistido em data/telegram_offset.json pra nunca reprocessar o mesmo
-    update entre reinícios. Chamada com frequência própria (APPROVAL_POLL_INTERVAL_SECONDS)
-    em main.py, separada do ciclo de scraping — ver loop em main.main().
+    thread do bot) por cliques novos nos botões Aprovar/Rejeitar/Editar/Tentar via IA de
+    novo e por respostas de texto livre a um prompt de edição (ver
+    _handle_edit_request/_handle_edit_reply). Usa um offset persistido em
+    data/telegram_offset.json pra nunca reprocessar o mesmo update entre reinícios.
+    Chamada com frequência própria (APPROVAL_POLL_INTERVAL_SECONDS) em main.py, separada
+    do ciclo de scraping — ver loop em main.main(). `config` é repassado pra
+    _handle_retry_ia_text poder chamar ai_writer.generate_proposal_text de novo.
     """
     offset = _load_offset()
     updates = _telegram_call("getUpdates", {"offset": offset, "timeout": 0})
@@ -533,7 +598,7 @@ def poll_decisions() -> None:
         max_update_id = max(max_update_id, update["update_id"])
         callback = update.get("callback_query")
         if callback:
-            _handle_callback(callback)
+            _handle_callback(callback, config)
             continue
         message = update.get("message")
         if message:

@@ -40,22 +40,35 @@ def _aplicar_desconto_competitivo(oferta_sugerida: float, proposal_cfg: dict) ->
     return max(ajustada, piso)
 
 
-def _build_texto(project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None) -> str:
+def _build_texto(
+    project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None
+) -> tuple[str, bool]:
+    """
+    Retorna (texto, texto_ia_falhou). texto_ia_falhou só é True quando texto_modo == "ia",
+    havia full_description pra tentar (isto é, a IA de fato foi chamada) e a geração
+    falhou/foi rejeitada — é esse caso específico que notifier.py sinaliza na mensagem de
+    aprovação com um botão "🔄 Tentar gerar via IA novamente" (ver
+    notifier._handle_retry_ia_text), já que só faz sentido reoferecer a tentativa quando a
+    causa foi uma falha da IA (ex: API fora do ar), não a ausência da própria descrição.
+    """
     proposal_cfg = config.get("proposal", {})
     modo = proposal_cfg.get("texto_modo", "fixo")
 
+    texto_ia_falhou = False
     if modo == "ia" and full_description:
         gerado = ai_writer.generate_proposal_text(project, full_description, config)
         if gerado:
-            return gerado
+            return gerado, False
         log.warning("Geração via IA indisponível/rejeitada para '%s' — usando template fixo.", project.get("title"))
+        texto_ia_falhou = True
 
     template = proposal_cfg.get("texto", "Olá! Tenho interesse em {titulo}.")
-    return template.format(
+    texto = template.format(
         titulo=project.get("title", ""),
         oferta=format_currency_br(oferta),
         prazo_dias=prazo_dias,
     )
+    return texto, texto_ia_falhou
 
 
 def build_proposal(
@@ -117,7 +130,7 @@ def build_proposal(
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
 
-    texto = _build_texto(project, config, oferta, prazo_dias, full_description)
+    texto, texto_ia_falhou = _build_texto(project, config, oferta, prazo_dias, full_description)
 
     # Checagem final, INDEPENDENTE da origem do texto (IA já é checada dentro de
     # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
@@ -133,7 +146,13 @@ def build_proposal(
         )
         texto = _SAFE_FALLBACK_TEXTO
 
-    resultado = {"oferta": oferta, "prazo_dias": prazo_dias, "texto": texto, "origem_valor": origem}
+    resultado = {
+        "oferta": oferta,
+        "prazo_dias": prazo_dias,
+        "texto": texto,
+        "origem_valor": origem,
+        "texto_ia_falhou": texto_ia_falhou,
+    }
     if origem == "ia" and oferta_sugerida_ia != oferta:
         # Guarda o valor bruto sugerido pela IA (antes do desconto competitivo) pra
         # notifier.py mostrar os dois lado a lado no Telegram — ajuda a validar/lapidar

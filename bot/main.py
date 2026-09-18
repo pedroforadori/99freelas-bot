@@ -252,7 +252,7 @@ def main() -> None:
                          next_scrape_at - time.time(), approval_poll_interval)
                 while time.time() < next_scrape_at:
                     try:
-                        notifier.poll_decisions()
+                        notifier.poll_decisions(config)
                         process_pending_approvals(page, config, monthly_quota)
                     except Exception as e:
                         # Erros aqui ficam só no log — categoria de falha diferente da do
