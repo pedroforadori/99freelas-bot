@@ -5,9 +5,12 @@ TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env (ver README/CLAUDE.md pra como obt
 Falha sempre silenciosamente (só loga um warning): notificação nunca deve derrubar o
 ciclo do bot nem impedir o registro da proposta em storage.py.
 """
+import html
 import json
+import logging
 import os
 import re
+import time
 
 import requests
 
@@ -70,6 +73,64 @@ def _telegram_call(method: str, payload: dict) -> dict | list | None:
     except Exception as e:
         log.warning("Erro na chamada Telegram %s: %s", method, e)
         return None
+
+
+def notify_activity(text: str) -> None:
+    """
+    Log de atividade rotineira do bot pro Telegram (diferente de notify_bot_status, que só
+    cobre transições de ciclo de vida). Desliga com ACTIVITY_LOG_TELEGRAM=false no .env.
+    """
+    if os.environ.get("ACTIVITY_LOG_TELEGRAM", "true").strip().lower() in ("false", "0", "no", "off"):
+        return
+    _send_telegram(text)
+
+
+class TelegramErrorHandler(logging.Handler):
+    """
+    Encaminha WARNING/ERROR de qualquer módulo pro Telegram, com módulo de origem e a
+    exceção (se houver) — pra mapear onde o bot mais falha. Ignora o próprio notifier
+    (evita loop: falha de envio ao Telegram gera warning, que geraria outro envio) e
+    descarta repetição idêntica dentro de 60s (ex: mesmo 503 em retries seguidos).
+    """
+
+    _DEDUPE_SECONDS = 60
+
+    def __init__(self):
+        super().__init__(level=logging.WARNING)
+        self._recent: dict[str, float] = {}
+        self._sending = False
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._sending or record.name == __name__:
+            return
+        try:
+            msg = record.getMessage()
+            if record.exc_info and record.exc_info[1]:
+                exc = record.exc_info[1]
+                msg += f"\n{type(exc).__name__}: {str(exc).splitlines()[0] if str(exc) else ''}"
+            key = f"{record.name}|{msg}"
+            now = time.time()
+            if now - self._recent.get(key, 0) < self._DEDUPE_SECONDS:
+                return
+            self._recent = {k: t for k, t in self._recent.items() if now - t < self._DEDUPE_SECONDS}
+            self._recent[key] = now
+            emoji = "🔴" if record.levelno >= logging.ERROR else "⚠️"
+            self._sending = True
+            notify_activity(f"{emoji} <b>{record.levelname}</b> em <code>{esc(record.name)}</code>\n{esc(msg)[:3500]}")
+        except Exception:
+            pass
+        finally:
+            self._sending = False
+
+
+def install_error_forwarding() -> None:
+    """Liga o TelegramErrorHandler no logger raiz (chamado uma vez por main.py)."""
+    logging.getLogger().addHandler(TelegramErrorHandler())
+
+
+def esc(text) -> str:
+    """Escapa texto dinâmico (títulos, motivos) pro parse_mode HTML do Telegram."""
+    return html.escape(str(text))
 
 
 _STATUS_EMOJI = {

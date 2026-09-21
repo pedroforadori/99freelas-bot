@@ -66,16 +66,19 @@ def run_cycle(page, config: dict, monthly_quota: int) -> None:
     projects = scraper.fetch_open_projects(page)
     new_projects = [p for p in projects if not already_applied(p["id"])]
     log.info("%d projetos novos (de %d na página) ainda não avaliados.", len(new_projects), len(projects))
+    notifier.notify_activity(f"🔎 Ciclo: {len(new_projects)} projeto(s) novo(s) de {len(projects)} na página")
 
     queued_count = 0
     for project in new_projects:
         if proposals_sent_today() >= max_per_day:
             log.info("Limite diário atingido no meio do ciclo, parando por hoje.")
+            notifier.notify_activity("⏸️ Limite diário atingido no meio do ciclo, parando por hoje.")
             break
 
         match, reason = is_match(project, config)
         if not match:
             log.info("Ignorado: '%s' — %s", project["title"], reason)
+            notifier.notify_activity(f"🚫 Ignorado: {notifier.esc(project['title'])}\n{notifier.esc(reason)}")
             register_application(project["id"], project["title"], status="skipped_duplicate", detail=reason)
             continue
 
@@ -125,6 +128,7 @@ def process_pending_approvals(page, config: dict, monthly_quota: int) -> None:
 
         if entry["decision"] == "rejected":
             log.info("Rejeitada pelo usuário: '%s'", project.get("title"))
+            notifier.notify_activity(f"❌ Rejeitada por você: {notifier.esc(project.get('title'))}")
             register_application(
                 project_id, project["title"], status="rejected_by_user", detail="rejeitada pelo usuário via Telegram"
             )
@@ -142,6 +146,7 @@ def process_pending_approvals(page, config: dict, monthly_quota: int) -> None:
             )
             continue
 
+        notifier.notify_activity(f"🚀 Enviando proposta aprovada: {notifier.esc(project.get('title'))}")
         success, detail = submitter.finalize_submission(page, project, proposal)
         status = "sent" if success else "failed"
         log.info("%s (aprovada): '%s' — %s", "ENVIADA" if success else "FALHOU", project.get("title"), detail)
@@ -204,6 +209,7 @@ def open_authenticated_page(browser):
 def main() -> None:
     load_dotenv()
     config = load_config()
+    notifier.install_error_forwarding()
 
     headless = os.environ.get("HEADLESS", "true").lower() == "true"
     interval_min = int(os.environ.get("CHECK_INTERVAL_MIN_SECONDS", 180))
