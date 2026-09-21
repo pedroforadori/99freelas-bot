@@ -258,6 +258,7 @@ def main() -> None:
                 next_scrape_at = time.time() + random.uniform(interval_min, interval_max)
                 log.info("Aguardando até %.0fs pro próximo ciclo (checando aprovações a cada %ds)...",
                          next_scrape_at - time.time(), approval_poll_interval)
+                notifier.notify_activity(f"⏳ Próximo ciclo em {next_scrape_at - time.time():.0f}s")
                 while time.time() < next_scrape_at:
                     try:
                         notifier.poll_decisions(config)

@@ -19,6 +19,7 @@ from bot.logger_setup import get_logger
 log = get_logger(__name__)
 
 MAX_IMAGES = 5
+MANUAL_PASS = False  # ligado por `portfolio.py --manual-pass`: pausa após abrir cada página pro usuário passar do antibot
 DESKTOP_SHOTS = 3
 MOBILE_SHOTS = 2
 
@@ -127,6 +128,9 @@ def _shoot(browser, url: str, out_dir: str, prefix: str, positions: tuple, *, mo
     try:
         page = context.new_page()
         page.goto(url, wait_until="load", timeout=45000)
+        if MANUAL_PASS:
+            # Site com antibot (ex: Cloudflare): o usuário resolve na janela visível.
+            input(f"[{'mobile' if mobile else 'desktop'}] Passe da verificação na janela e tecle Enter aqui... ")
         page.wait_for_timeout(2000)  # deixa animações de entrada/hero terminarem
         _dismiss_overlays(page)
         if not mobile:

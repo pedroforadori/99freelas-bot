@@ -215,7 +215,10 @@ def main() -> None:
     parser.add_argument("--play-store", help="link da Play Store (item de app; junto com --app-store vira um item só)")
     parser.add_argument("--file", help="YAML com a lista de itens")
     parser.add_argument("--variant", type=int, default=0, help="outro conjunto de pontos de rolagem (0-3), só sites")
+    parser.add_argument("--manual-pass", action="store_true",
+                        help="abre o navegador visível e pausa pra você passar do antibot (Cloudflare) antes de cada captura")
     args = parser.parse_args()
+    portfolio_capture.MANUAL_PASS = args.manual_pass
 
     specs = [_normalize(u) for u in args.urls]
     if args.app_store or args.play_store:
@@ -232,7 +235,7 @@ def main() -> None:
         log.warning("PORTFOLIO_TELEGRAM_BOT_TOKEN não configurado — sem botões: as imagens vão direto pra %s.", OUTPUT_DIR)
     items = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=not args.manual_pass)
         try:
             for spec in specs:
                 item = build_item(spec, browser, config, args.variant)
