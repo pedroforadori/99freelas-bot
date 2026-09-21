@@ -249,3 +249,82 @@ def suggest_price_and_deadline(project: dict, full_description: str, config: dic
         return None
 
     return round(oferta, 2), prazo_dias
+
+
+PORTFOLIO_TITULO_MAX = 50  # maxlength de #titulo no formulário de portfólio do 99Freelas
+PORTFOLIO_DESCRICAO_MAX = 400  # maxlength de #descricao
+
+_PORTFOLIO_SYSTEM_PROMPT = (
+    "Você escreve o título e a descrição de um trabalho no portfólio de um freelancer de "
+    "desenvolvimento, no 99Freelas, em português do Brasil. Recebe dados públicos do "
+    "site/app (título, descrição, trecho do texto). Regras OBRIGATÓRIAS:\n"
+    f"- Título com NO MÁXIMO {PORTFOLIO_TITULO_MAX} caracteres, descrição com NO MÁXIMO "
+    f"{PORTFOLIO_DESCRICAO_MAX} caracteres.\n"
+    "- Descreva o que é o projeto e o que ele entrega pro cliente final, em linguagem simples "
+    "— quem lê é um possível cliente leigo. NÃO cite tecnologias, frameworks, linguagens ou siglas técnicas.\n"
+    "- NUNCA inclua e-mail, telefone, WhatsApp, redes sociais, links/URLs ou preços.\n"
+    "- Não invente funcionalidades, números, prêmios ou clientes que não estejam nos dados recebidos.\n"
+    "- Tom profissional e direto, sem exageros de marketing.\n"
+    "- Responda APENAS com um objeto JSON válido, sem markdown, no formato exato: "
+    '{"titulo": "...", "descricao": "..."}.'
+)
+
+
+def _build_portfolio_user_prompt(context: dict) -> str:
+    tipo = "app mobile" if context.get("kind") == "app" else "site"
+    return (
+        f"Tipo: {tipo}\n"
+        f"Título encontrado: {context.get('title', '')}\n"
+        f"Descrição encontrada: {context.get('meta_description', '')}\n"
+        f"Trecho do conteúdo: {context.get('text', '')}\n\n"
+        "Escreva título e descrição seguindo todas as regras do system prompt."
+    )
+
+
+def check_portfolio_text(titulo: str, descricao: str) -> str | None:
+    """Motivo se título/descrição violarem limite ou regra de segurança, senão None."""
+    if not titulo.strip():
+        return "título vazio"
+    if len(titulo) > PORTFOLIO_TITULO_MAX:
+        return f"título com {len(titulo)} caracteres (máx {PORTFOLIO_TITULO_MAX})"
+    if len(descricao) > PORTFOLIO_DESCRICAO_MAX:
+        return f"descrição com {len(descricao)} caracteres (máx {PORTFOLIO_DESCRICAO_MAX})"
+    return check_text_safety(f"{titulo}\n{descricao}")
+
+
+def generate_portfolio_text(context: dict, config: dict) -> tuple[str, str] | None:
+    """
+    Gera (titulo, descricao) do item de portfólio a partir do contexto público capturado
+    (ver portfolio_capture). Retorna None se a IA falhar, a resposta não for o JSON esperado
+    ou violar limite/regra (check_portfolio_text) — o chamador cai pro texto do próprio
+    site/app, marcado pra revisão. Mesma filosofia de generate_proposal_text: nunca confiar
+    só na instrução do prompt.
+    """
+    proposal_cfg = config.get("proposal", {})
+    provider_name = proposal_cfg.get("ia_provider", "anthropic")
+    provider = _PROVIDERS.get(provider_name)
+    if not provider:
+        log.warning("ia_provider '%s' desconhecido (use 'anthropic' ou 'gemini').", provider_name)
+        return None
+
+    generate_fn, default_model = provider
+    model = proposal_cfg.get("ia_model", default_model)
+    raw = generate_fn(_build_portfolio_user_prompt(context), model, system_prompt=_PORTFOLIO_SYSTEM_PROMPT)
+    if not raw:
+        log.warning("IA (%s) não retornou texto de portfólio.", provider_name)
+        return None
+
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        data = json.loads(cleaned)
+        titulo = str(data["titulo"]).strip()
+        descricao = str(data["descricao"]).strip()
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        log.warning("Resposta de portfólio da IA não é um JSON válido (%s): %r", e, raw[:200])
+        return None
+
+    violation = check_portfolio_text(titulo, descricao)
+    if violation:
+        log.warning("Texto de portfólio da IA rejeitado (%s).", violation)
+        return None
+    return titulo, descricao
