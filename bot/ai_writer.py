@@ -11,6 +11,7 @@ instrução do modelo pra isso.
 import json
 import os
 import re
+import time
 
 from bot.logger_setup import get_logger
 
@@ -122,24 +123,33 @@ def _generate_with_gemini(user_prompt: str, model: str, system_prompt: str = _SY
         log.warning("Biblioteca 'google-genai' não instalada (ver requirements.txt).")
         return None
 
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                max_output_tokens=1200,
-                # Sem isso, modelos "thinking" (ex: gemini-3.6-flash) consomem o
-                # max_output_tokens inteiro com raciocínio interno e cortam o texto
-                # final na metade — confirmado testando (thoughts_token_count > 0).
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
-            ),
-        )
-        return (response.text or "").strip()
-    except Exception as e:
-        log.warning("Falha ao gerar proposta via Gemini: %s", e)
-        return None
+    client = genai.Client(api_key=api_key)
+    # 503 (modelo sobrecarregado) e 429 são transitórios e frequentes no Gemini — confirmado
+    # em produção (2026-09-21) derrubando quase toda proposta; tenta de novo com backoff.
+    esperas = [0, 3, 8, 15]
+    for tentativa, espera in enumerate(esperas, start=1):
+        if espera:
+            time.sleep(espera)
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=user_prompt,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    max_output_tokens=1200,
+                    # Sem isso, modelos "thinking" (ex: gemini-3.6-flash) consomem o
+                    # max_output_tokens inteiro com raciocínio interno e cortam o texto
+                    # final na metade — confirmado testando (thoughts_token_count > 0).
+                    thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+                ),
+            )
+            return (response.text or "").strip()
+        except Exception as e:
+            transitorio = any(c in str(e) for c in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"))
+            log.warning("Falha ao gerar proposta via Gemini (tentativa %d/%d): %s", tentativa, len(esperas), e)
+            if not transitorio:
+                return None
+    return None
 
 
 _PROVIDERS = {
