@@ -39,7 +39,11 @@ def fetch_open_projects(page: Page, max_items: int = 30) -> list[dict]:
     NOTA: "budget" sempre vem None — a listagem não mostra orçamento, só a página do
     projeto/proposta (ver PROJECT_CARD_BUDGET ausente em site_selectors.py).
     """
-    page.goto(sel.PROJECTS_LIST_URL, wait_until="networkidle")
+    # "networkidle" quase nunca é atingido nessa página (mesmo motivo já corrigido em
+    # connections.py/messages.py pro /dashboard, commit c411488) — algum script de
+    # analytics/chat mantém requisição em aberto, estourando os 30s default e derrubando
+    # o ciclo inteiro (confirmado: 227 ocorrências consecutivas no log de produção).
+    page.goto(sel.PROJECTS_LIST_URL, wait_until="load")
     cards = page.query_selector_all(sel.PROJECT_CARD)
     log.info("Encontrados %d cards de projeto na listagem", len(cards))
 
