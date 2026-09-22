@@ -132,6 +132,15 @@ def build_proposal(
 
     texto, texto_ia_falhou = _build_texto(project, config, oferta, prazo_dias, full_description)
 
+    # Nota fixa opcional (ex: "estou começando no site, mas tenho portfólio") anexada
+    # SEMPRE por fora do texto gerado — decisão explícita do usuário de deixar isso fixo em
+    # vez de pedir pra IA reformular a cada vez, pra não arriscar ela variar/errar a
+    # redação de uma alegação factual (quantos projetos, onde conferir etc.). Entra ANTES
+    # de check_text_safety pra continuar coberta pela mesma rede de segurança.
+    nota_extra = (proposal_cfg.get("nota_extra") or "").strip()
+    if nota_extra:
+        texto = f"{texto}\n\n{nota_extra}"
+
     # Checagem final, INDEPENDENTE da origem do texto (IA já é checada dentro de
     # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
     # essa é a rede de segurança que garante que nem um template mal configurado consiga

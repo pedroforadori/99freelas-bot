@@ -63,3 +63,7 @@ proposal:
     Olá! Tenho experiência relevante com {titulo} e gostaria de me candidatar a este projeto.
 
     Fico à disposição para conversarmos sobre os detalhes. Obrigado pela oportunidade!
+
+  # Nota fixa opcional, anexada ao final de QUALQUER texto (IA ou template fixo), sempre
+  # do jeito exato escrito aqui — nunca reformulada pela IA. null/"" = não anexa nada.
+  nota_extra: null
