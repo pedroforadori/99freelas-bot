@@ -66,7 +66,8 @@ def run_cycle(page, config: dict, monthly_quota: int) -> None:
     projects = scraper.fetch_open_projects(page)
     new_projects = [p for p in projects if not already_applied(p["id"])]
     log.info("%d projetos novos (de %d na página) ainda não avaliados.", len(new_projects), len(projects))
-    notifier.notify_activity(f"🔎 Ciclo: {len(new_projects)} projeto(s) novo(s) de {len(projects)} na página")
+    if new_projects:
+        notifier.notify_activity(f"🔎 Ciclo: {len(new_projects)} projeto(s) novo(s) de {len(projects)} na página")
 
     queued_count = 0
     for project in new_projects:
@@ -258,7 +259,6 @@ def main() -> None:
                 next_scrape_at = time.time() + random.uniform(interval_min, interval_max)
                 log.info("Aguardando até %.0fs pro próximo ciclo (checando aprovações a cada %ds)...",
                          next_scrape_at - time.time(), approval_poll_interval)
-                notifier.notify_activity(f"⏳ Próximo ciclo em {next_scrape_at - time.time():.0f}s")
                 while time.time() < next_scrape_at:
                     try:
                         notifier.poll_decisions(config)
