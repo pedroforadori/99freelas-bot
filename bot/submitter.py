@@ -45,6 +45,26 @@ def _read_full_description(page: Page) -> str | None:
     return el.inner_text().strip()
 
 
+def _button_reappears(page: Page, timeout: int = 5000) -> bool:
+    """
+    Dá mais alguns segundos de chance ao botão real (PROPOSAL_BUTTON) antes de aceitar sua
+    ausência como definitiva, quando o clique em cima dele já expirou. Confirmado em
+    produção (2026-09-22, projeto 786281 "Desenvolvimento de plataforma web de logística de
+    estoque"): checar a presença do botão logo após o timeout do clique pode pegar a página
+    no meio da hidratação (SPA) — o botão real só apareceu segundos depois, mas na hora do
+    timeout só o banner genérico "Ver plano" (PROPOSAL_PREMIUM_REQUIRED_MARKER) estava
+    presente, gerando um falso "requer plano Freelancer Premium" (verificado manualmente
+    minutos depois: botão real E banner coexistindo normalmente, mesmo padrão do caso
+    785336 documentado no CLAUDE.md). state="attached" (nunca "visible"), mesmo padrão de
+    sempre pra checagem de presença.
+    """
+    try:
+        page.wait_for_selector(sel.PROPOSAL_BUTTON, state="attached", timeout=timeout)
+        return True
+    except PlaywrightTimeoutError:
+        return False
+
+
 def is_logged_in(page: Page) -> bool:
     try:
         # state="attached": só confirma presença no DOM, não exige visibilidade — o
@@ -110,7 +130,7 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
         # erroneamente relatado como "requer Premium". Corrigido: só trata como
         # bloqueio de Premium quando o botão real (PROPOSAL_BUTTON) de fato NÃO existe
         # na página — checagem por presença, nunca clique, mesmo padrão de sempre.
-        if page.query_selector(sel.PROPOSAL_BUTTON):
+        if _button_reappears(page):
             return None, "clique em 'Enviar proposta' expirou mas o botão ainda existe na página (tentar de novo)"
         if page.query_selector(sel.PROJECT_CLOSED_MARKER):
             return None, "projeto foi fechado"
@@ -152,7 +172,7 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         # Ver comentário equivalente em prepare_proposal: o marcador de Premium pode
         # coexistir com o botão real, então só é sinal confiável de bloqueio quando o
         # botão real de fato não está mais na página.
-        if page.query_selector(sel.PROPOSAL_BUTTON):
+        if _button_reappears(page):
             return _finish(
                 project,
                 None,
