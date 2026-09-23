@@ -10,5 +10,6 @@ data/connections.json
 data/messages_state.json
 data/pending_approvals.json
 data/telegram_offset.json
+data/manual_queue.json
 data/portfolio/
 logs/
