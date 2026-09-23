@@ -45,6 +45,23 @@ def _read_full_description(page: Page) -> str | None:
     return el.inner_text().strip()
 
 
+def _read_project_title(page: Page, url: str) -> str:
+    """
+    Título de um projeto aberto direto pelo link (sem card da listagem), lido de
+    PROJECT_PAGE_TITLE sem o "(+ detalhes)" do span filho. Se o elemento não existir, cai
+    pro slug da URL humanizado ("criacao-de-site-123" → "Criacao de site", sem acentos
+    mas legível).
+    """
+    el = page.query_selector(sel.PROJECT_PAGE_TITLE)
+    titulo = el.inner_text() if el else ""
+    titulo = re.sub(r"\s*\(\s*\+\s*detalhes\s*\)\s*$", "", titulo.replace("\xa0", " "), flags=re.I).strip()
+    if titulo:
+        return titulo
+
+    slug = re.sub(r"-\d+$", "", url.rstrip("/").rsplit("/", 1)[-1])
+    return slug.replace("-", " ").capitalize() or url
+
+
 def _button_reappears(page: Page, timeout: int = 5000) -> bool:
     """
     Dá mais alguns segundos de chance ao botão real (PROPOSAL_BUTTON) antes de aceitar sua
@@ -106,6 +123,11 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
     montar um preço (ver bot/proposal.py).
     """
     page.goto(project["url"], wait_until="networkidle")
+
+    # Projeto enviado manualmente por link (main.process_manual_projects) chega sem título —
+    # a IA e a mensagem de aprovação precisam dele.
+    if not project.get("title"):
+        project["title"] = _read_project_title(page, project["url"])
 
     # Checagem por PRESENÇA, nunca clique: um dos marcadores é o link "Cancelar proposta",
     # que CANCELARIA a proposta já enviada se fosse clicado.

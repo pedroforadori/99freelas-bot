@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # permite `python bot/main.py`
 
-from bot import approvals, connections, messages, notifier, scraper, submitter
+from bot import approvals, connections, manual_queue, messages, notifier, scraper, submitter
 from bot import site_selectors as sel
 from bot.filter import is_match
 from bot.logger_setup import get_logger
@@ -104,6 +104,62 @@ def run_cycle(page, config: dict) -> None:
 
         # delay curto entre preparos dentro do mesmo ciclo, pra não parecer um robô disparando em rajada
         time.sleep(random.uniform(5, 15))
+
+
+def process_manual_projects(page, config: dict) -> None:
+    """
+    Projetos cujo link o usuário colou no chat do Telegram (enfileirados por
+    notifier._handle_project_link em manual_queue). Mesmo caminho de um match de
+    run_cycle — prepare_proposal → pedido de aprovação — mas SEM passar por is_match
+    (decisão do usuário: se mandou o link, quer propor) e mesmo que o projeto já tenha
+    sido ignorado/falhado/rejeitado antes. As checagens de "já enviada", projeto fechado
+    e Premium continuam valendo (vivem em prepare_proposal).
+    """
+    for item in manual_queue.peek_all():
+        project_id, url = item["id"], item["url"]
+
+        pending = approvals.get_pending(project_id)
+        if pending is not None and pending["decision"] is None:
+            notifier.notify_manual_project_failed(url, "esse projeto já está aguardando sua aprovação no Telegram")
+            manual_queue.remove(project_id)
+            continue
+
+        project = {
+            "id": project_id,
+            "title": "",  # preenchido por prepare_proposal a partir da página
+            "url": url,
+            "category": "",
+            "budget": None,
+            "description": "",
+            "posted_minutes_ago": None,
+        }
+        try:
+            proposal, reason = submitter.prepare_proposal(page, project, config)
+        except Exception as e:
+            # Tira da fila mesmo assim — senão um link problemático seria retentado a cada
+            # APPROVAL_POLL_INTERVAL_SECONDS pra sempre. O usuário pode colar de novo.
+            log.exception("Erro ao preparar proposta (link manual) %s: %s", url, e)
+            proposal, reason = None, f"erro inesperado: {e}"
+        if proposal is None:
+            log.info("Não foi possível preparar proposta (link manual): %s — %s", url, reason)
+            # Não sobrescreve um registro anterior (ex: "sent" de uma proposta já enviada,
+            # que é justamente um dos motivos de falha aqui).
+            if not already_applied(project_id):
+                register_application(project_id, project["title"] or url, status="failed", detail=reason)
+            notifier.notify_manual_project_failed(url, reason)
+            manual_queue.remove(project_id)
+            continue
+
+        message_id = notifier.send_approval_request(project, proposal)
+        approvals.add_pending(project, proposal, message_id)
+        register_application(project_id, project["title"], status="pending_approval", detail="link enviado manualmente")
+        manual_queue.remove(project_id)
+        log.info(
+            "Aguardando aprovação (link manual): '%s' — oferta=R$%s, prazo=%sd",
+            project["title"],
+            proposal["oferta"],
+            proposal["prazo_dias"],
+        )
 
 
 def process_pending_approvals(page, config: dict) -> None:
@@ -245,6 +301,7 @@ def main() -> None:
                     try:
                         notifier.poll_decisions(config)
                         process_pending_approvals(page, config)
+                        process_manual_projects(page, config)
                         # Checagem de mensagens não lidas usa a própria cadência
                         # (MESSAGES_POLL_INTERVAL_SECONDS), mais espaçada que o polling de
                         # aprovações — cada checagem navega até /dashboard (messages.refresh),

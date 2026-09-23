@@ -64,6 +64,12 @@ PROJECT_ID_URL_REGEX = r"/project/[a-z0-9-]+-(\d+)"
 # Descrição completa (sem truncar) do projeto, na própria página do projeto — diferente
 # de PROJECT_CARD_DESCRIPTION (".description"), que é o trecho truncado da listagem.
 PROJECT_PAGE_DESCRIPTION = ".item-text.project-description"
+# Título do projeto na própria página do projeto (usado quando o projeto chega por link
+# colado no Telegram, sem card da listagem). Confirmado contra HTML real fornecido pelo
+# usuário — o inner_text inclui um filho "(+ detalhes)" (span.detalhes), removido em
+# submitter._read_project_title. Ex real:
+# <span class="nome-projeto">Desenvolver aplicativo ...<span class="detalhes">&nbsp;(<span class="link-detalhes">+ detalhes</span>)</span></span>
+PROJECT_PAGE_TITLE = "span.nome-projeto"
 # "Enviar proposta" é um link que NAVEGA pra uma página separada (/project/bid/<slug>-<id>),
 # não abre um formulário na mesma página — ver navegação explícita em submitter.py.
 PROPOSAL_BUTTON = "a.clickable:has-text('Enviar proposta')"

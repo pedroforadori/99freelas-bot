@@ -14,7 +14,7 @@ import time
 
 import requests
 
-from bot import ai_writer, approvals, connections, storage
+from bot import ai_writer, approvals, connections, manual_queue, storage
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
 from bot.proposal import ORIGEM_LABELS
@@ -616,6 +616,42 @@ def _handle_retry_ia_text(callback_id: str, project_id: str, config: dict) -> No
     _answer_callback(callback_id, "Novo texto gerado ✅")
 
 
+# Aceita a página do projeto e a de envio (/project/bid/...), com ou sem www/query string.
+_PROJECT_LINK_REGEX = re.compile(r"https?://(?:www\.)?99freelas\.com\.br/project/(?:bid/)?([a-z0-9-]+-(\d+))", re.I)
+
+
+def _handle_project_link(message: dict) -> None:
+    """
+    Mensagem solta (não é reply a um prompt de edição) com link de projeto do 99Freelas:
+    enfileira em manual_queue pra main.process_manual_projects preparar a proposta e mandar
+    o pedido de aprovação, igual a um projeto novo da varredura (sem passar pelo filtro do
+    config.yaml — decisão do usuário: se mandou o link, quer propor). Só aceita mensagens
+    do próprio TELEGRAM_CHAT_ID — qualquer um pode escrever pro bot, e isso gasta conexão
+    se aprovado. Qualquer outra mensagem é ignorada sem aviso.
+    """
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not chat_id or str(message.get("chat", {}).get("id")) != str(chat_id):
+        return
+
+    textos = [message.get("text") or message.get("caption") or ""]
+    textos += [e["url"] for e in message.get("entities", []) + message.get("caption_entities", []) if e.get("url")]
+    matches = {m.group(2): m.group(1) for texto in textos for m in _PROJECT_LINK_REGEX.finditer(texto)}
+    if not matches:
+        return
+
+    for project_id, slug in matches.items():
+        url = f"https://www.99freelas.com.br/project/{slug.lower()}"
+        if manual_queue.add(project_id, url):
+            _send_telegram(f"📥 Link recebido — preparando proposta pro projeto {project_id}...")
+        else:
+            _send_telegram(f"📥 Projeto {project_id} já está na fila, aguarde.")
+
+
+def notify_manual_project_failed(url: str, reason: str) -> None:
+    """Falha ao preparar um projeto enviado manualmente (ver main.process_manual_projects)."""
+    _send_telegram(f"⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> {esc(url)}\n<b>Motivo:</b> {esc(reason)}")
+
+
 def _handle_callback(callback: dict, config: dict) -> None:
     callback_id = callback["id"]
     data_str = callback.get("data", "")
@@ -690,7 +726,10 @@ def poll_decisions(config: dict) -> None:
             continue
         message = update.get("message")
         if message:
-            _handle_edit_reply(message)
+            if message.get("reply_to_message"):
+                _handle_edit_reply(message)
+            else:
+                _handle_project_link(message)
 
     if max_update_id >= offset:
         _save_offset(max_update_id + 1)
