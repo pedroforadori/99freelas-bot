@@ -11,7 +11,7 @@ já está em disco e será processada na próxima vez que o bot rodar — nada s
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 _LOCK = threading.Lock()
 DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "pending_approvals.json")
@@ -134,10 +134,63 @@ def get_pending(project_id: str) -> dict | None:
 
 
 def get_decided_unresolved() -> list[dict]:
-    """Retorna as entradas com decision != None — prontas pra process_pending_approvals resolver."""
+    """
+    Retorna as entradas com decisão "approved"/"rejected" — prontas pra
+    process_pending_approvals resolver. Entradas "failed" (ver mark_failed) ficam de fora:
+    só voltam pra fila quando o usuário clica em "🔄 Tentar de novo" (retry_failed).
+    """
     with _LOCK:
         data = _load()
-        return [{"project_id": pid, **entry} for pid, entry in data.items() if entry["decision"] is not None]
+        return [
+            {"project_id": pid, **entry}
+            for pid, entry in data.items()
+            if entry["decision"] in ("approved", "rejected")
+        ]
+
+
+_FAILED_RETENTION_DAYS = 7
+
+
+def mark_failed(project_id: str) -> None:
+    """
+    Envio aprovado que falhou em submitter.finalize_submission: em vez de remover a
+    entrada (resolve), guarda com decision="failed" pra que o botão "🔄 Tentar de novo" da
+    notificação de falha possa reenviar a MESMA proposta (com edições de oferta/prazo),
+    sem remontar nada. Aproveita pra descartar falhas antigas (> _FAILED_RETENTION_DAYS)
+    que nunca foram retentadas, pra o arquivo não crescer pra sempre.
+    """
+    with _LOCK:
+        data = _load()
+        entry = data.get(project_id)
+        if entry is None:
+            return
+        entry["decision"] = "failed"
+        entry["decided_at"] = datetime.utcnow().isoformat()
+        cutoff = datetime.utcnow() - timedelta(days=_FAILED_RETENTION_DAYS)
+        data = {
+            pid: e
+            for pid, e in data.items()
+            if not (e["decision"] == "failed" and e.get("decided_at") and datetime.fromisoformat(e["decided_at"]) < cutoff)
+        }
+        _save(data)
+
+
+def retry_failed(project_id: str) -> bool:
+    """
+    Clique em "🔄 Tentar de novo" numa falha de envio: volta a entrada "failed" pra
+    "approved", e process_pending_approvals reenvia no próximo tick. Retorna False se não
+    houver entrada "failed" pra esse id (ex: falha no preparo, antes de existir proposta —
+    aí quem chama cai pro caminho de preparar de novo via manual_queue).
+    """
+    with _LOCK:
+        data = _load()
+        entry = data.get(project_id)
+        if entry is None or entry["decision"] != "failed":
+            return False
+        entry["decision"] = "approved"
+        entry["decided_at"] = datetime.utcnow().isoformat()
+        _save(data)
+        return True
 
 
 def resolve(project_id: str) -> None:

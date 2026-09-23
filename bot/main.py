@@ -120,7 +120,9 @@ def process_manual_projects(page, config: dict) -> None:
 
         pending = approvals.get_pending(project_id)
         if pending is not None and pending["decision"] is None:
-            notifier.notify_manual_project_failed(url, "esse projeto já está aguardando sua aprovação no Telegram")
+            notifier.notify_manual_project_failed(
+                url, "esse projeto já está aguardando sua aprovação no Telegram", retry=False
+            )
             manual_queue.remove(project_id)
             continue
 
@@ -192,7 +194,12 @@ def process_pending_approvals(page, config: dict) -> None:
         log.info("%s (aprovada): '%s' — %s", "ENVIADA" if success else "FALHOU", project.get("title"), detail)
         register_application(project_id, project["title"], status=status, detail=detail)
         notifier.finalize_approval_message(message_id, approved=success, detail="" if success else detail)
-        approvals.resolve(project_id)
+        if success:
+            approvals.resolve(project_id)
+        else:
+            # Mantém a proposta guardada pro botão "🔄 Tentar de novo" da notificação de
+            # falha poder reenviá-la igual (ver approvals.mark_failed/retry_failed).
+            approvals.mark_failed(project_id)
 
 
 def open_authenticated_page(browser):

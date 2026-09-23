@@ -28,24 +28,23 @@ _TELEGRAM_MSG_LIMIT = 4096
 _OFFSET_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "telegram_offset.json")
 
 
-def _send_telegram(text: str) -> None:
+def _send_telegram(text: str, reply_markup: dict | None = None) -> None:
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         log.warning("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID não configurados — notificação não enviada.")
         return
 
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
-        resp = requests.post(
-            TELEGRAM_API_URL.format(token=token),
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=10,
-        )
+        resp = requests.post(TELEGRAM_API_URL.format(token=token), json=payload, timeout=10)
         if resp.status_code != 200:
             log.warning("Falha ao enviar notificação Telegram (%s): %s", resp.status_code, resp.text)
     except Exception as e:
@@ -301,7 +300,12 @@ def notify_proposal_result(
 
     linhas.append(f"<b>Detalhe:</b> {detail}")
 
-    _send_telegram("\n".join(linhas))
+    # Falha real ganha botão de retry (ver _handle_retry_failed). Nunca em simulação.
+    reply_markup = None
+    if status != "sent" and not simulated and project.get("id"):
+        reply_markup = {"inline_keyboard": [[{"text": "🔄 Tentar de novo", "callback_data": f"retry:{project['id']}"}]]}
+
+    _send_telegram("\n".join(linhas), reply_markup)
 
 
 # --- Fluxo de aprovação (substitui o envio 100% automático em main.py) ---
@@ -647,9 +651,65 @@ def _handle_project_link(message: dict) -> None:
             _send_telegram(f"📥 Projeto {project_id} já está na fila, aguarde.")
 
 
-def notify_manual_project_failed(url: str, reason: str) -> None:
-    """Falha ao preparar um projeto enviado manualmente (ver main.process_manual_projects)."""
-    _send_telegram(f"⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> {esc(url)}\n<b>Motivo:</b> {esc(reason)}")
+def notify_manual_project_failed(url: str, reason: str, retry: bool = True) -> None:
+    """
+    Falha ao preparar um projeto enviado manualmente (ver main.process_manual_projects).
+    `retry=True` adiciona o botão "🔄 Tentar de novo" (ver _handle_retry_failed).
+    """
+    reply_markup = None
+    match = _PROJECT_LINK_REGEX.search(url)
+    if retry and match:
+        reply_markup = {"inline_keyboard": [[{"text": "🔄 Tentar de novo", "callback_data": f"retry:{match.group(2)}"}]]}
+    _send_telegram(
+        f"⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> {esc(url)}\n<b>Motivo:</b> {esc(reason)}",
+        reply_markup,
+    )
+
+
+def _handle_retry_failed(callback_id: str, project_id: str, message: dict) -> None:
+    """
+    Clique em "🔄 Tentar de novo" numa notificação de falha (notify_proposal_result).
+    Dois casos:
+    - Falha no ENVIO de uma proposta já aprovada (entrada "failed" em approvals, ver
+      main.process_pending_approvals): volta pra "approved" e o próximo tick reenvia a
+      MESMA proposta (com edições de oferta/prazo) — não pede aprovação de novo.
+    - Falha no PREPARO (não chegou a existir proposta): enfileira o link em manual_queue,
+      que prepara do zero e manda um novo pedido de aprovação (mesmo caminho de um link
+      colado no chat). O link vem do texto da própria mensagem de falha — callback_data
+      só comporta o id (limite de 64 bytes).
+    Nunca toca o Playwright aqui (mesma regra do resto de poll_decisions).
+    """
+    if approvals.retry_failed(project_id):
+        ack, label = "Reenviando a proposta aprovada...", "⏳ Reenviando..."
+    else:
+        entry = approvals.get_pending(project_id)
+        if entry is not None and entry["decision"] is None:
+            _answer_callback(callback_id, "Esse projeto já está aguardando sua aprovação.")
+            return
+        if entry is not None and entry["decision"] == "approved":
+            _answer_callback(callback_id, "Esse projeto já está sendo enviado.")
+            return
+        match = _PROJECT_LINK_REGEX.search(message.get("text", ""))
+        if not match:
+            _answer_callback(callback_id, "Não achei o link do projeto nessa mensagem — cole o link no chat.")
+            return
+        url = f"https://www.99freelas.com.br/project/{match.group(1).lower()}"
+        if not manual_queue.add(project_id, url):
+            _answer_callback(callback_id, "Esse projeto já está na fila, aguarde.")
+            return
+        ack, label = "Preparando a proposta de novo...", "⏳ Preparando de novo..."
+
+    # Troca o botão pra evitar duplo-clique enquanto o retry roda.
+    if message.get("message_id"):
+        _telegram_call(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
+                "message_id": message["message_id"],
+                "reply_markup": {"inline_keyboard": [[{"text": label, "callback_data": "noop"}]]},
+            },
+        )
+    _answer_callback(callback_id, ack)
 
 
 def _handle_callback(callback: dict, config: dict) -> None:
@@ -658,6 +718,10 @@ def _handle_callback(callback: dict, config: dict) -> None:
     message_id = callback.get("message", {}).get("message_id")
 
     parts = data_str.split(":")
+
+    if parts[0] == "retry" and len(parts) == 2:
+        _handle_retry_failed(callback_id, parts[1], callback.get("message", {}))
+        return
 
     if parts[0] == "editf" and len(parts) == 3:
         _, field, project_id = parts
