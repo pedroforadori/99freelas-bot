@@ -13,3 +13,8 @@ data/telegram_offset.json
 data/manual_queue.json
 data/portfolio/
 logs/
+
+# Exports de cookies de sessão (Cookie-Editor etc.), soltos na raiz antes de importar
+# via bot/import_cookies.py — nunca commitar, é sessão real da conta.
+*_json_*.json
+cookies*.json
