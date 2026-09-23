@@ -207,6 +207,11 @@ def _propostas_hoje_line(status: str, simulated: bool) -> str:
     return f"<b>Hoje:</b> {enviadas_hoje}/{max_per_day}"
 
 
+def _limite_diario_atingido() -> bool:
+    monthly_quota = int(os.environ.get("MONTHLY_PROPOSAL_QUOTA", 240))
+    return storage.proposals_sent_today() >= daily_quota(monthly_quota)
+
+
 def _conexoes_usadas_line(status: str, simulated: bool) -> str | None:
     """
     Monta a linha "Conexões usadas: X/Y" a partir do cache de connections.py (saldo real
@@ -324,6 +329,11 @@ def _approval_text(project: dict, proposal: dict) -> str:
     origem_line = _origem_line(proposal)
     if origem_line:
         valores += f"{origem_line}\n"
+    # A cota diária não bloqueia mais a fila (ver main.run_cycle) — mostra o ritmo do dia
+    # aqui pro usuário decidir se vale gastar uma conexão extra. Pode passar de Y (ex: 11/8).
+    valores += f"{_propostas_hoje_line('pending', simulated=False)}\n"
+    if _limite_diario_atingido():
+        valores += "⚠️ <b>Limite diário já atingido</b> — aprovar gasta conexão extra além do ritmo do dia.\n"
     if proposal.get("texto_ia_falhou"):
         valores += (
             "⚠️ <b>A IA falhou ao gerar o texto</b> — abaixo está o template fixo de "

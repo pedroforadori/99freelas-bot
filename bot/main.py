@@ -14,8 +14,7 @@ from bot import approvals, connections, messages, notifier, scraper, submitter
 from bot import site_selectors as sel
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.storage import already_applied, proposals_sent_today, register_application
-from bot.utils import daily_quota
+from bot.storage import already_applied, register_application
 
 log = get_logger("main")
 
@@ -46,19 +45,18 @@ def load_config() -> dict:
         return yaml.safe_load(f) or {}
 
 
-def run_cycle(page, config: dict, monthly_quota: int) -> None:
+def run_cycle(page, config: dict) -> None:
     """
     Varredura de projetos novos. NÃO envia proposta nenhuma diretamente — pra cada match,
     monta a proposta completa (submitter.prepare_proposal) e manda pro Telegram pra
     aprovação (approvals.add_pending + notifier.send_approval_request). O envio de
     verdade só acontece depois, em process_pending_approvals, quando o usuário aprova.
-    """
-    max_per_day = daily_quota(monthly_quota)
-    sent_today = proposals_sent_today()
-    if sent_today >= max_per_day:
-        log.info("Limite diário de %d propostas atingido (%d enviadas). Aguardando o próximo dia.", max_per_day, sent_today)
-        return
 
+    A cota diária (utils.daily_quota) NÃO bloqueia mais a varredura nem o envio —
+    decisão do usuário: mesmo passando do limite do dia, os projetos continuam chegando
+    no Telegram e ele decide se gasta conexões extras (a mensagem de aprovação mostra
+    "Hoje: X/Y" com aviso quando X >= Y, ver notifier._approval_text).
+    """
     # Atualiza o saldo real de conexões (lido de /dashboard) uma vez por ciclo — usado
     # por notifier.py pra montar o contador "Conexões usadas: X/Y" nas notificações.
     connections.refresh(page)
@@ -71,11 +69,6 @@ def run_cycle(page, config: dict, monthly_quota: int) -> None:
 
     queued_count = 0
     for project in new_projects:
-        if proposals_sent_today() >= max_per_day:
-            log.info("Limite diário atingido no meio do ciclo, parando por hoje.")
-            notifier.notify_activity("⏸️ Limite diário atingido no meio do ciclo, parando por hoje.")
-            break
-
         match, reason = is_match(project, config)
         if not match:
             log.info("Ignorado: '%s' — %s", project["title"], reason)
@@ -113,14 +106,14 @@ def run_cycle(page, config: dict, monthly_quota: int) -> None:
         time.sleep(random.uniform(5, 15))
 
 
-def process_pending_approvals(page, config: dict, monthly_quota: int) -> None:
+def process_pending_approvals(page, config: dict) -> None:
     """
     Resolve aprovações/rejeições já decididas no Telegram (decision != None, gravado por
     notifier.poll_decisions ANTES desta função rodar — ver bot/approvals.py). Só aqui o
     Playwright é usado de verdade pra enviar; poll_decisions em si nunca toca a Page.
+    Aprovação envia mesmo acima da cota diária — o clique do usuário é a decisão de
+    gastar a conexão extra (ver docstring de run_cycle).
     """
-    max_per_day = daily_quota(monthly_quota)
-
     for entry in approvals.get_decided_unresolved():
         project_id = entry["project_id"]
         project = entry["project"]
@@ -135,16 +128,6 @@ def process_pending_approvals(page, config: dict, monthly_quota: int) -> None:
             )
             notifier.finalize_approval_message(message_id, approved=False, detail="rejeitada por você via Telegram")
             approvals.resolve(project_id)
-            continue
-
-        # decision == "approved" — mas a cota pode ter enchido entre a fila e agora
-        # (aprovações podem ficar pendentes por tempo indefinido). Não resolve nesse
-        # caso: tenta de novo no próximo ciclo/dia, mantendo o teclado como
-        # "Processando..." (já trocado por notifier._handle_callback no clique).
-        if proposals_sent_today() >= max_per_day:
-            log.info(
-                "Cota diária atingida — aprovação de '%s' fica pendente pro próximo ciclo/dia.", project.get("title")
-            )
             continue
 
         notifier.notify_activity(f"🚀 Enviando proposta aprovada: {notifier.esc(project.get('title'))}")
@@ -215,7 +198,6 @@ def main() -> None:
     headless = os.environ.get("HEADLESS", "true").lower() == "true"
     interval_min = int(os.environ.get("CHECK_INTERVAL_MIN_SECONDS", 180))
     interval_max = int(os.environ.get("CHECK_INTERVAL_MAX_SECONDS", 420))
-    monthly_quota = int(os.environ.get("MONTHLY_PROPOSAL_QUOTA", 240))
     approval_poll_interval = int(os.environ.get("APPROVAL_POLL_INTERVAL_SECONDS", 20))
     messages_poll_interval = int(os.environ.get("MESSAGES_POLL_INTERVAL_SECONDS", 60))
 
@@ -234,7 +216,7 @@ def main() -> None:
         try:
             while True:
                 try:
-                    run_cycle(page, config, monthly_quota)
+                    run_cycle(page, config)
                     if consecutive_errors > 0:
                         log.info("Ciclo voltou ao normal após %d falha(s) consecutiva(s).", consecutive_errors)
                         notifier.notify_bot_status(
@@ -262,7 +244,7 @@ def main() -> None:
                 while time.time() < next_scrape_at:
                     try:
                         notifier.poll_decisions(config)
-                        process_pending_approvals(page, config, monthly_quota)
+                        process_pending_approvals(page, config)
                         # Checagem de mensagens não lidas usa a própria cadência
                         # (MESSAGES_POLL_INTERVAL_SECONDS), mais espaçada que o polling de
                         # aprovações — cada checagem navega até /dashboard (messages.refresh),
