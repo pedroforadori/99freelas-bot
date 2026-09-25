@@ -11,7 +11,7 @@ log = get_logger(__name__)
 # check_text_safety mesmo assim. Sem placeholders, sem risco nenhum.
 _SAFE_FALLBACK_TEXTO = "Olá! Tenho interesse nesse projeto e gostaria de conversar sobre os detalhes. Fico à disposição."
 
-# Rótulos exibidos no Telegram (ver notifier._approval_text/notify_proposal_result) pra
+# Rótulos exibidos no Telegram (ver bot/sources/freelas99/views.py) pra
 # deixar claro de onde veio o valor/prazo de cada proposta — a IA só é chamada pra sugerir
 # preço quando não há nem orçamento do cliente nem média de propostas concorrentes (ver
 # build_proposal abaixo), então o usuário precisa saber qual base foi usada antes de aprovar.
@@ -77,7 +77,7 @@ def _build_texto(
     havia full_description pra tentar (isto é, a IA de fato foi chamada) e a geração
     falhou/foi rejeitada — é esse caso específico que notifier.py sinaliza na mensagem de
     aprovação com um botão "🔄 Tentar gerar via IA novamente" (ver
-    notifier._handle_retry_ia_text), já que só faz sentido reoferecer a tentativa quando a
+    Freelas99Source._on_retry_ia_text), já que só faz sentido reoferecer a tentativa quando a
     causa foi uma falha da IA (ex: API fora do ar), não a ausência da própria descrição.
     """
     proposal_cfg = config.get("proposal", {})
@@ -238,7 +238,7 @@ def build_proposal(
 # qual estilo converte melhor, cada proposta sorteia um estilo (pesos em
 # proposal.texto_variantes do config.yaml), gravado em applied_jobs.json junto com o
 # resultado marcado pelo usuário no Telegram (cola o link do projeto no chat do bot e
-# clica "💬 Respondeu"/"🏆 Fechou" — ver notifier._handle_link_action). `python bot/report.py` mostra as taxas por estilo.
+# clica "💬 Respondeu"/"🏆 Fechou" — ver Freelas99Source._on_link_action). `python bot/report.py` mostra as taxas por estilo.
 
 
 def _arredondar_para_baixo(valor: float) -> float:

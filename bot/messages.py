@@ -14,7 +14,7 @@ import os
 import threading
 from datetime import datetime
 
-from bot import notifier
+from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
 
@@ -98,4 +98,4 @@ def check_and_notify(page) -> None:
         return
 
     if novo["unread_count"] > anterior_count:
-        notifier.notify_new_messages(novo["unread_count"], anterior_count)
+        views.notify_new_messages(novo["unread_count"], anterior_count)

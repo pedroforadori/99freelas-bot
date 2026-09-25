@@ -4,9 +4,9 @@ cota localmente (MONTHLY_PROPOSAL_QUOTA / dias do mês corrente), porque a renov
 plano não necessariamente cai no dia 1 (ex: renovação real confirmada em 17/10/2026 numa
 conta real) e porque pode haver conexões não-expiráveis somadas ao saldo total.
 
-Cacheado em data/connections.json e atualizado uma vez por ciclo (run_cycle em main.py,
+Cacheado em data/connections.json e atualizado uma vez por ciclo (Freelas99Source.run_cycle,
 antes do scraping da listagem) — não a cada proposta, pra não multiplicar navegações.
-notifier.py lê esse cache (sem precisar de acesso à Page) e soma localmente as propostas
+bot/sources/freelas99/views.py lê esse cache (sem precisar de acesso à Page) e soma localmente as propostas
 reais enviadas depois do último refresh, pra manter o contador correto entre atualizações.
 """
 import json

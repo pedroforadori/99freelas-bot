@@ -4,7 +4,7 @@ Relatório de conversão por estilo de texto da proposta (`python bot/report.py`
 Cada proposta enviada grava em data/applied_jobs.json o estilo de texto sorteado
 ("texto_variante", ver proposal._sortear_variante_texto); o resultado ("respondeu" |
 "fechou") é marcado pelo usuário colando o link do projeto no chat do bot e clicando
-"💬 Respondeu"/"🏆 Fechou" (ver notifier._handle_link_action). Este script cruza os dois
+"💬 Respondeu"/"🏆 Fechou" (ver Freelas99Source._on_link_action). Este script cruza os dois
 pra mostrar qual estilo está convertendo melhor. Só leitura — não altera nada.
 """
 import os

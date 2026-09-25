@@ -2,7 +2,7 @@ import re
 
 from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
 
-from bot import notifier
+from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
 from bot.proposal import build_proposal
@@ -14,15 +14,15 @@ _AVG_PROPOSAL_VALUE_PATTERN = re.compile(r"Valor médio das propostas:?\s*R\$\s*
 _AVG_DURATION_PATTERN = re.compile(r"Duração média estimada:?\s*(\d+)", re.IGNORECASE)
 
 # Motivo devolvido por prepare_proposal(require_average=True) quando o projeto ainda não
-# tem a média de propostas concorrentes — main.run_cycle guarda o projeto como
-# "awaiting_average" e checa de novo a cada ciclo (ver main._recheck_awaiting_average).
+# tem a média de propostas concorrentes — Freelas99Source.run_cycle guarda o projeto como
+# "awaiting_average" e checa de novo a cada ciclo (ver Freelas99Source._recheck_awaiting_average).
 AGUARDANDO_MEDIA = "aguardando média de propostas concorrentes"
 
 
 def _finish(
     project: dict, proposal: dict | None, success: bool, detail: str, simulated: bool = False
 ) -> tuple[bool, str]:
-    notifier.notify_proposal_result(project, proposal, "sent" if success else "failed", detail, simulated=simulated)
+    views.notify_proposal_result(project, proposal, "sent" if success else "failed", detail, simulated=simulated)
     return success, detail
 
 
@@ -134,7 +134,7 @@ def prepare_proposal(
 ) -> tuple[dict | None, str]:
     """
     Abre a página do projeto, monta a proposta completa (oferta, prazo, texto) SEM
-    preencher nem enviar nada. Usada tanto pelo fluxo de aprovação (main.run_cycle, que
+    preencher nem enviar nada. Usada tanto pelo fluxo de aprovação (Freelas99Source.run_cycle, que
     guarda o resultado em approvals.py pra revisão no Telegram) quanto por
     finalize_submission indiretamente via submit_proposal (ver abaixo).
 
@@ -144,11 +144,11 @@ def prepare_proposal(
 
     require_average: se True e a página de envio ainda não mostrar a média de propostas
     concorrentes, retorna (None, AGUARDANDO_MEDIA) ANTES de chamar qualquer IA — usado pela
-    varredura com proposal.aguardar_media (ver main.run_cycle).
+    varredura com proposal.aguardar_media (ver Freelas99Source.run_cycle).
     """
     page.goto(project["url"], wait_until="networkidle")
 
-    # Projeto enviado manualmente por link (main.process_manual_projects) chega sem título —
+    # Projeto enviado manualmente por link (Freelas99Source.process_manual_projects) chega sem título —
     # a IA e a mensagem de aprovação precisam dele.
     if not project.get("title"):
         project["title"] = _read_project_title(page, project["url"])
@@ -194,7 +194,7 @@ def prepare_proposal(
     if proposal is None:
         return None, "sem dado de preço concorrente/orçamento e a IA não sugeriu um valor coerente"
 
-    # Guardado dentro do próprio proposal pra notifier.send_approval_request poder mostrar
+    # Guardado dentro do próprio proposal pra a mensagem de aprovação poder mostrar
     # a descrição completa na mensagem de aprovação, sem precisar de mais um parâmetro.
     proposal["full_description"] = full_description
 

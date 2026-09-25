@@ -1,9 +1,9 @@
 """
-Fila de propostas prontas aguardando aprovação humana via Telegram (ver notifier.py e
-main.process_pending_approvals). Persiste em data/pending_approvals.json — mesmo padrão
+Fila de propostas prontas aguardando aprovação humana via Telegram (ver telegram_dispatcher.py e
+JobSource.resolve_approval em bot/sources/base.py). Persiste em data/pending_approvals.json — mesmo padrão
 de escrita atômica (.tmp + os.replace) e lock de thread de storage.py.
 
-O campo "decision" é o que dá segurança contra crash: notifier.poll_decisions() grava a
+O campo "decision" é o que dá segurança contra crash: telegram_dispatcher grava a
 decisão aqui IMEDIATAMENTE ao receber o clique no Telegram, antes de qualquer interação
 com o Playwright. Se o processo cair entre o clique do usuário e o envio real, a decisão
 já está em disco e será processada na próxima vez que o bot rodar — nada se perde.
@@ -50,7 +50,7 @@ def add_pending(project: dict, proposal: dict, message_id: int | None) -> None:
 def update_proposal(project_id: str, proposal: dict) -> bool:
     """
     Substitui a proposta pendente (usado pela edição de oferta/prazo por texto livre no
-    Telegram, ANTES da decisão final — ver notifier._handle_edit_reply). Só aplica se a
+    Telegram, ANTES da decisão final — ver TelegramDispatcher._on_edit_reply). Só aplica se a
     entrada existir e ainda não tiver decisão gravada, mesma proteção de
     record_decision: evita reescrever a oferta/prazo depois que o usuário já
     aprovou/rejeitou (ou entre o clique e o "⏳ Processando...", já em voo).
@@ -68,8 +68,8 @@ def update_proposal(project_id: str, proposal: dict) -> bool:
 def set_pending_edit(project_id: str, field: str, prompt_message_id: int) -> bool:
     """
     Registra que a entrada está aguardando resposta (reply) a `prompt_message_id` — a
-    mensagem de force_reply mandada por notifier._handle_edit_request pedindo o novo
-    valor de `field` ("o" oferta | "p" prazo) em texto livre. Mesma proteção de
+    mensagem de force_reply mandada por TelegramDispatcher._on_edit_request pedindo o novo
+    valor de `field` (EditableField.code da fonte, ex: "o" oferta) em texto livre. Mesma proteção de
     update_proposal: recusa se a entrada não existir ou já tiver decisão gravada.
     """
     with _LOCK:
@@ -85,7 +85,7 @@ def set_pending_edit(project_id: str, field: str, prompt_message_id: int) -> boo
 def find_by_prompt_message_id(prompt_message_id: int) -> tuple[str, str] | None:
     """
     Acha (project_id, field) a partir do message_id de um prompt de force_reply — é assim
-    que notifier.poll_decisions correlaciona uma resposta de texto livre (que só traz
+    que TelegramDispatcher correlaciona uma resposta de texto livre (que só traz
     reply_to_message.message_id) de volta à edição que a originou, sem precisar de
     nenhum parsing heurístico do texto da resposta em si.
     """
@@ -194,7 +194,7 @@ def retry_failed(project_id: str) -> bool:
 
 
 def resolve(project_id: str) -> None:
-    """Remove a entrada depois que main.process_pending_approvals já tratou a decisão."""
+    """Remove a entrada depois que JobSource.resolve_approval já tratou a decisão."""
     with _LOCK:
         data = _load()
         data.pop(project_id, None)

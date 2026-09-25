@@ -1,9 +1,10 @@
 """
 Fila de projetos enviados manualmente pelo usuário (link colado no chat do Telegram) pra
 passarem pelo mesmo fluxo de aprovação de um projeto novo da varredura — ver
-notifier._handle_project_link (enfileira) e main.process_manual_projects (prepara).
+Freelas99Source._on_link_action (enfileira) e Freelas99Source.process_manual_projects (prepara),
+em bot/sources/freelas99/source.py.
 
-Existe separada de approvals.py porque notifier.poll_decisions nunca toca o Playwright:
+Existe separada de approvals.py porque o polling do Telegram nunca toca o Playwright:
 ele só grava o link aqui, e o loop principal (dono da Page) prepara a proposta depois.
 Persiste em data/manual_queue.json — mesmo padrão de escrita atômica (.tmp + os.replace)
 e lock de thread de storage.py, pra um link recebido não se perder se o processo cair

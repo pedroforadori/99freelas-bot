@@ -27,8 +27,16 @@ from bot import logger_setup  # noqa: E402
 # (nada de escrever no logs/bot.log real; o pytest captura via propagação pro root).
 logger_setup.get_logger = logging.getLogger
 
-from bot import approvals, connections, manual_queue, messages, storage, utils  # noqa: E402
-from bot import github_jobs, main, notifier  # noqa: E402
+from bot import ai_writer, approvals, connections, email_sender, manual_queue, messages  # noqa: E402
+from bot import main, notifier, storage, submitter, telegram_api, utils  # noqa: E402
+from bot.sources import registry  # noqa: E402
+from bot.sources.freelas99 import views as views_99  # noqa: E402
+from bot.sources.github import client as github_jobs  # noqa: E402
+from bot.sources.github import views as views_gh  # noqa: E402
+from bot.telegram_dispatcher import TelegramDispatcher  # noqa: E402
+
+FREELAS99 = registry.source_of({"source": "99freelas"})
+GITHUB = registry.source_of({"source": "github"})
 
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
 CHAT_ID = "4242"
@@ -153,7 +161,7 @@ def _data_paths():
         (connections, "CACHE_PATH", "connections.json"),
         (messages, "CACHE_PATH", "messages_state.json"),
         (github_jobs, "DATA_PATH", "github_jobs.json"),
-        (notifier, "_OFFSET_PATH", "telegram_offset.json"),
+        (telegram_api, "_OFFSET_PATH", "telegram_offset.json"),
     ]
 
 
@@ -163,28 +171,33 @@ def _data_paths():
 @pytest.fixture
 def api(monkeypatch):
     page = object()  # Playwright nunca é usado de verdade: submitter é mockado nos testes
+    monkeypatch.setattr(FREELAS99, "page", page)
 
-    def patch_submitter(name, fn):
-        monkeypatch.setattr(main.submitter, name, fn)
+    def render_approval(project, proposal):
+        return registry.source_of(project).render_approval(project, proposal)
+
+    def run_github_cycle(config):
+        if GITHUB.is_enabled(config):  # main.py só roda as fontes ativas
+            GITHUB.run_cycle(config)
 
     return SimpleNamespace(
         page=page,
-        render_approval=notifier._render_approval,
-        send_approval_request=notifier.send_approval_request,
-        notify_proposal_result=notifier.notify_proposal_result,
-        notify_manual_project_failed=notifier.notify_manual_project_failed,
-        notify_new_messages=notifier.notify_new_messages,
-        notify_github_no_email=notifier.notify_github_no_email,
-        notify_github_email_result=notifier.notify_github_email_result,
-        poll=lambda config: notifier.poll_decisions(config),
-        process_approvals=lambda config: main.process_pending_approvals(page, config),
-        process_manual_projects=lambda config: main.process_manual_projects(page, config),
-        run_cycle=lambda config: main.run_cycle(page, config),
-        run_github_cycle=lambda config: main.run_github_cycle(config),
+        render_approval=render_approval,
+        send_approval_request=lambda project, proposal: notifier.send_approval_message(*render_approval(project, proposal)),
+        notify_proposal_result=views_99.notify_proposal_result,
+        notify_manual_project_failed=views_99.notify_manual_project_failed,
+        notify_new_messages=views_99.notify_new_messages,
+        notify_github_no_email=views_gh.notify_no_email,
+        notify_github_email_result=views_gh.notify_email_result,
+        poll=lambda config: TelegramDispatcher(registry.ALL_SOURCES, config).poll(),
+        process_approvals=lambda config: main.process_pending_approvals(),
+        process_manual_projects=FREELAS99.process_manual_projects,
+        run_cycle=FREELAS99.run_cycle,
+        run_github_cycle=run_github_cycle,
         github=github_jobs,
-        patch_submitter=patch_submitter,
-        patch_email_send=lambda fn: monkeypatch.setattr(main.email_sender, "send", fn),
-        patch_ai_text=lambda fn: monkeypatch.setattr(notifier.ai_writer, "generate_proposal_text", fn),
+        patch_submitter=lambda name, fn: monkeypatch.setattr(submitter, name, fn),
+        patch_email_send=lambda fn: monkeypatch.setattr(email_sender, "send", fn),
+        patch_ai_text=lambda fn: monkeypatch.setattr(ai_writer, "generate_proposal_text", fn),
         patch_fetch_issues=lambda fn: monkeypatch.setattr(github_jobs, "fetch_issues", fn),
     )
 

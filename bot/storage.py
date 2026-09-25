@@ -34,7 +34,7 @@ def register_application(
     """
     `extra`: campos adicionais gravados junto no registro — usado pra guardar a estratégia
     da proposta enviada (versão do teste A/B, oferta, origem do valor, estilo do texto; ver
-    main.process_pending_approvals), base pra comparar as versões depois.
+    Freelas99Source.on_delivered), base pra comparar as versões depois.
     """
     with _LOCK:
         data = _load()
@@ -55,7 +55,7 @@ def record_outcome(project_id: str, resultado: str) -> str | None:
     """
     Grava o resultado de uma proposta enviada ("respondeu" | "fechou"), marcado pelo usuário
     no Telegram (link colado no chat + botão "💬 Respondeu"/"🏆 Fechou", ver
-    notifier._handle_link_action). "fechou" nunca é rebaixado pra "respondeu".
+    Freelas99Source._on_link_action). "fechou" nunca é rebaixado pra "respondeu".
     Retorna o resultado final gravado, ou None se o projeto não existir no histórico.
     """
     with _LOCK:

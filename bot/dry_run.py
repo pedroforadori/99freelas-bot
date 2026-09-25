@@ -25,7 +25,8 @@ from playwright.sync_api import sync_playwright
 from bot import connections, messages, notifier, scraper, submitter
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.main import load_config, open_authenticated_page
+from bot.main import load_config
+from bot.sources.freelas99.auth import open_authenticated_page
 
 log = get_logger("dry_run")
 

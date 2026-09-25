@@ -1,6 +1,6 @@
 """
-Envio de e-mail por SMTP (candidatura a vagas do GitHub, ver github_jobs.py) — só chamado
-por main.process_pending_approvals depois da aprovação no Telegram.
+Envio de e-mail por SMTP (candidatura a vagas do GitHub, ver bot/sources/github/) — só chamado
+por GitHubSource.deliver depois da aprovação no Telegram.
 
 Config no .env: SMTP_HOST, SMTP_PORT (587 = STARTTLS, 465 = SSL), SMTP_USER,
 SMTP_PASSWORD, EMAIL_FROM (default SMTP_USER) e EMAIL_FROM_NAME (opcional). No Gmail,
