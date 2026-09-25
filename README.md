@@ -110,6 +110,15 @@ python bot/portfolio.py --app-store URL --play-store URL
 python bot/portfolio.py --file trabalhos.yaml
 ```
 
+### Testes
+
+Rode antes de subir/reiniciar o bot (sem rede, sem navegador, sem tocar em `data/`):
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
 ### Deploy (24/7)
 
 ```bash
@@ -125,14 +134,20 @@ O container reinicia automaticamente (`restart: unless-stopped`) e persiste `dat
 ## Como funciona
 
 ```
-main.py          loop principal: varredura + polling de aprovações/mensagens/links
+main.py          loop principal: roda as fontes de vagas + polling de aprovações
+sources/         uma pasta por fonte de vagas (interface JobSource em sources/base.py)
+  freelas99/     99Freelas: varredura, preparo/envio da proposta, links colados
+  github/        vagas em issues do GitHub, candidatura por e-mail (SMTP)
+  registry.py    lista das fontes ativas — nova fonte = subclasse + uma linha aqui
+telegram_dispatcher.py  cliques e respostas no Telegram (aprovar, editar, tentar de novo)
+telegram_api.py  chamadas HTTP à API do Telegram
 scraper.py       extrai os projetos da listagem
 filter.py        decide se o projeto combina com o perfil (config.yaml)
 proposal.py      monta oferta, prazo e texto
 ai_writer.py     chamadas de IA (texto da proposta, sugestão de preço, portfólio)
 submitter.py     prepara a proposta e, depois da aprovação, envia no site
 approvals.py     fila de propostas aguardando aprovação (data/pending_approvals.json)
-notifier.py      tudo que envolve Telegram (mensagens, botões, respostas)
+notifier.py      notificações comuns (status do bot, erros, log de atividade)
 manual_queue.py  fila de projetos enviados por link no Telegram
 connections.py   saldo de conexões do plano (lido do /dashboard)
 messages.py      contador de mensagens não lidas (badge do header)
