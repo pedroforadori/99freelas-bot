@@ -28,13 +28,22 @@ budget_max: null
 proposal:
   # "orcamento_cliente" usa o valor pedido pelo cliente
   # "fixo" usa oferta_fixa abaixo
-  # "menor_proposta" lê o menor valor já proposto por outro freelancer no projeto e
-  #   oferece undercut_percent% a menos; se ainda não houver proposta concorrente,
-  #   cai automaticamente para o comportamento de "orcamento_cliente"
+  # "menor_proposta" lê o valor médio das propostas concorrentes no projeto e oferece
+  #   essa média arredondada pra baixo na centena (1230 -> 1200; abaixo de R$100, na
+  #   dezena); se ainda não houver média, a IA sugere o valor
   oferta_estrategia: "orcamento_cliente"
   oferta_fixa: null                          # usado só se oferta_estrategia = "fixo"
-  undercut_percent: 5                        # usado só se oferta_estrategia = "menor_proposta"
   prazo_dias: 7
+
+  # Só manda pro Telegram depois que a página de envio mostrar a média de valor e de
+  # prazo das propostas concorrentes (o site mostra a partir de ~5 propostas). Até lá o
+  # projeto fica "awaiting_average" em data/applied_jobs.json e é checado de novo a cada
+  # ciclo de varredura. Desiste depois de aguardar_media_max_horas (trava de segurança).
+  # Com a média de prazo, o prazo proposto fica prazo_desconto_percent% abaixo dela
+  # (ex: média 10 dias -> 8 dias). Links colados manualmente no Telegram não esperam.
+  aguardar_media: true
+  aguardar_media_max_horas: 48
+  prazo_desconto_percent: 20
 
   # Desconto paliativo sobre a sugestão de preço da IA (usada só quando não há nem
   # orçamento do cliente nem propostas concorrentes pra basear o valor — ver
@@ -55,6 +64,29 @@ proposal:
   texto_modo: "fixo"
   ia_provider: "gemini"          # "anthropic" (requer ANTHROPIC_API_KEY) ou "gemini" (requer GEMINI_API_KEY)
   ia_model: "gemini-3.6-flash"   # ajuste conforme o provedor acima
+
+  # Estilo do texto (texto_modo "ia"): sorteado a cada proposta pelos pesos abaixo, pra
+  # descobrir qual converte melhor. Peso 0 (ou remover a linha) tira o estilo do sorteio.
+  #   padrao      — estilo original: profissional e direto, até ~1500 caracteres
+  #   pergunta    — curto, termina com uma pergunta sobre o projeto
+  #   plano       — resumo + 3-4 etapas numeradas + o que o cliente recebe
+  #   minimo      — 2-3 frases, até ~300 caracteres
+  #   resultado   — foca em como fica a situação do cliente depois do trabalho
+  #   diagnostico — aponta um cuidado/risco que o cliente não citou e como tratar
+  #   opcoes      — oferece um caminho enxuto e um completo, pergunta qual prefere
+  #   conversa    — tom informal e próximo, sem cara de proposta
+  # Cada envio grava o estilo em data/applied_jobs.json. Quando um cliente responder, cole
+  # o link do projeto no chat do bot e clique "💬 Respondeu" (ou "🏆 Fechou"); depois rode
+  # `python bot/report.py` pra ver as taxas por estilo.
+  texto_variantes:
+    padrao: 1
+    pergunta: 1
+    plano: 1
+    minimo: 1
+    resultado: 1
+    diagnostico: 1
+    opcoes: 1
+    conversa: 1
 
   # Template fixo (usado quando texto_modo == "fixo", ou como fallback se a IA falhar).
   # Variável disponível: {titulo}. NUNCA inclua {oferta}/{prazo_dias} aqui — valor e prazo

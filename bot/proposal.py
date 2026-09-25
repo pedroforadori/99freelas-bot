@@ -1,3 +1,6 @@
+import math
+import random
+
 from bot import ai_writer
 from bot.logger_setup import get_logger
 from bot.utils import format_currency_br
@@ -14,9 +17,24 @@ _SAFE_FALLBACK_TEXTO = "Olá! Tenho interesse nesse projeto e gostaria de conver
 # build_proposal abaixo), então o usuário precisa saber qual base foi usada antes de aprovar.
 ORIGEM_LABELS = {
     "ia": "🤖 Sugerido pela IA (sem orçamento do cliente nem propostas concorrentes)",
-    "menor_proposta": "📊 Baseado na média das propostas concorrentes",
+    "menor_proposta": "📊 Baseado na média das propostas concorrentes",  # propostas antigas
     "orcamento_cliente": "💰 Baseado no orçamento do cliente",
     "fixo": "📌 Valor fixo configurado",
+    "media_arredondada": "📊 Média das propostas concorrentes, arredondada pra baixo",
+}
+
+# Estilo do texto (ver ai_writer._TEXT_VARIANTS), exibido no Telegram e gravado em
+# applied_jobs.json pra comparar os estilos depois (ver bot/report.py).
+TEXTO_VARIANTE_LABELS = {
+    "padrao": "padrão (atual)",
+    "pergunta": "curto + pergunta ao cliente",
+    "plano": "etapas numeradas",
+    "minimo": "mínimo (2-3 frases)",
+    "resultado": "foco no resultado",
+    "diagnostico": "diagnóstico (aponta um cuidado)",
+    "opcoes": "dois caminhos pro cliente escolher",
+    "conversa": "conversa informal",
+    "template": "template fixo do config.yaml",
 }
 
 
@@ -40,11 +58,22 @@ def _aplicar_desconto_competitivo(oferta_sugerida: float, proposal_cfg: dict) ->
     return max(ajustada, piso)
 
 
+def _prazo_abaixo_da_media(media_prazo: int, proposal_cfg: dict) -> int:
+    """
+    Prazo um pouco abaixo da "Duração média estimada" das propostas concorrentes (pedido do
+    usuário, 2026-09-25): desconta `prazo_desconto_percent`% (default 20 — ex: média 10 dias
+    -> 8 dias), nunca abaixo de 1 dia.
+    """
+    desconto = proposal_cfg.get("prazo_desconto_percent", 20)
+    return max(1, round(media_prazo * (1 - desconto / 100)))
+
+
 def _build_texto(
     project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None
-) -> tuple[str, bool]:
+) -> tuple[str, bool, str]:
     """
-    Retorna (texto, texto_ia_falhou). texto_ia_falhou só é True quando texto_modo == "ia",
+    Retorna (texto, texto_ia_falhou, texto_variante) — texto_variante é o estilo sorteado
+    (ver _sortear_variante_texto), ou "template" quando o texto veio do template fixo. texto_ia_falhou só é True quando texto_modo == "ia",
     havia full_description pra tentar (isto é, a IA de fato foi chamada) e a geração
     falhou/foi rejeitada — é esse caso específico que notifier.py sinaliza na mensagem de
     aprovação com um botão "🔄 Tentar gerar via IA novamente" (ver
@@ -56,9 +85,10 @@ def _build_texto(
 
     texto_ia_falhou = False
     if modo == "ia" and full_description:
-        gerado = ai_writer.generate_proposal_text(project, full_description, config)
+        variante = _sortear_variante_texto(proposal_cfg)
+        gerado = ai_writer.generate_proposal_text(project, full_description, config, variante=variante)
         if gerado:
-            return gerado, False
+            return gerado, False, variante
         log.warning("Geração via IA indisponível/rejeitada para '%s' — usando template fixo.", project.get("title"))
         texto_ia_falhou = True
 
@@ -68,7 +98,37 @@ def _build_texto(
         oferta=format_currency_br(oferta),
         prazo_dias=prazo_dias,
     )
-    return texto, texto_ia_falhou
+    return texto, texto_ia_falhou, "template"
+
+
+def _finalizar_texto(texto: str, project: dict, proposal_cfg: dict) -> tuple[str, bool]:
+    """
+    Anexa a nota_extra e roda a checagem final de segurança. Retorna (texto, substituido)
+    — substituido=True quando o texto violou alguma regra e virou _SAFE_FALLBACK_TEXTO.
+    """
+    # Nota fixa opcional (ex: "estou começando no site, mas tenho portfólio") anexada
+    # SEMPRE por fora do texto gerado — decisão explícita do usuário de deixar isso fixo em
+    # vez de pedir pra IA reformular a cada vez, pra não arriscar ela variar/errar a
+    # redação de uma alegação factual (quantos projetos, onde conferir etc.). Entra ANTES
+    # de check_text_safety pra continuar coberta pela mesma rede de segurança.
+    nota_extra = (proposal_cfg.get("nota_extra") or "").strip()
+    if nota_extra:
+        texto = f"{texto}\n\n{nota_extra}"
+
+    # Checagem final, INDEPENDENTE da origem do texto (IA já é checada dentro de
+    # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
+    # essa é a rede de segurança que garante que nem um template mal configurado consiga
+    # colocar contato/valor/prazo dentro do texto da proposta).
+    violation = ai_writer.check_text_safety(texto)
+    if violation:
+        log.warning(
+            "Texto final da proposta pra '%s' violou regra de segurança (%s) — usando "
+            "fallback mínimo genérico em vez disso. Confira o template 'texto' em config.yaml.",
+            project.get("title"),
+            violation,
+        )
+        return _SAFE_FALLBACK_TEXTO, True
+    return texto, False
 
 
 def build_proposal(
@@ -76,6 +136,7 @@ def build_proposal(
     config: dict,
     lowest_bid: float | None = None,
     full_description: str | None = None,
+    media_prazo: int | None = None,
 ) -> dict | None:
     """
     Monta oferta, prazo e texto da proposta. Retorna dict pronto pra ser usado pelo
@@ -94,6 +155,10 @@ def build_proposal(
     == "ia") quanto, quando lowest_bid e o orçamento do cliente estão ausentes, pra pedir
     à IA uma sugestão de valor/prazo (ver bot/ai_writer.suggest_price_and_deadline) —
     sem essa segunda IA-sugestão, o comportamento seria cair direto pra oferta_fixa ou 0.
+
+    media_prazo: "Duração média estimada" das propostas concorrentes (mesmo bloco da média
+    de valor). Quando presente, o prazo vira um pouco abaixo dela (_prazo_abaixo_da_media)
+    em vez do prazo_dias fixo do config.yaml / da sugestão da IA.
     """
     proposal_cfg = config.get("proposal", {})
     estrategia = proposal_cfg.get("oferta_estrategia", "orcamento_cliente")
@@ -102,9 +167,10 @@ def build_proposal(
     prazo_dias = proposal_cfg.get("prazo_dias", 7)
 
     if estrategia == "menor_proposta" and lowest_bid:
-        undercut_percent = proposal_cfg.get("undercut_percent", 5)
-        oferta = round(lowest_bid * (1 - undercut_percent / 100), 2)
-        origem = "menor_proposta"
+        # Média das propostas concorrentes arredondada pra baixo (1230 -> 1200) — decisão do
+        # usuário (2026-09-25), no lugar do antigo undercut_percent% abaixo da média.
+        oferta = _arredondar_para_baixo(lowest_bid)
+        origem = "media_arredondada"
     elif estrategia == "menor_proposta" and not lowest_bid and not budget and full_description:
         # Nem "menor proposta" (média concorrente) nem orçamento do cliente disponíveis —
         # em vez de cair direto pra oferta_fixa/0, pede à IA uma sugestão coerente com o
@@ -130,30 +196,14 @@ def build_proposal(
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
 
-    texto, texto_ia_falhou = _build_texto(project, config, oferta, prazo_dias, full_description)
+    if media_prazo:
+        prazo_dias = _prazo_abaixo_da_media(media_prazo, proposal_cfg)
 
-    # Nota fixa opcional (ex: "estou começando no site, mas tenho portfólio") anexada
-    # SEMPRE por fora do texto gerado — decisão explícita do usuário de deixar isso fixo em
-    # vez de pedir pra IA reformular a cada vez, pra não arriscar ela variar/errar a
-    # redação de uma alegação factual (quantos projetos, onde conferir etc.). Entra ANTES
-    # de check_text_safety pra continuar coberta pela mesma rede de segurança.
-    nota_extra = (proposal_cfg.get("nota_extra") or "").strip()
-    if nota_extra:
-        texto = f"{texto}\n\n{nota_extra}"
+    texto, texto_ia_falhou, texto_variante = _build_texto(project, config, oferta, prazo_dias, full_description)
 
-    # Checagem final, INDEPENDENTE da origem do texto (IA já é checada dentro de
-    # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
-    # essa é a rede de segurança que garante que nem um template mal configurado consiga
-    # colocar contato/valor/prazo dentro do texto da proposta).
-    violation = ai_writer.check_text_safety(texto)
-    if violation:
-        log.warning(
-            "Texto final da proposta pra '%s' violou regra de segurança (%s) — usando "
-            "fallback mínimo genérico em vez disso. Confira o template 'texto' em config.yaml.",
-            project.get("title"),
-            violation,
-        )
-        texto = _SAFE_FALLBACK_TEXTO
+    texto, substituido = _finalizar_texto(texto, project, proposal_cfg)
+    if substituido:
+        texto_variante = "template"
 
     resultado = {
         "oferta": oferta,
@@ -161,6 +211,11 @@ def build_proposal(
         "texto": texto,
         "origem_valor": origem,
         "texto_ia_falhou": texto_ia_falhou,
+        # Metadados pra exibição no Telegram e registro em applied_jobs.json (não mudam o
+        # cálculo acima) — base pra comparar os estilos de texto depois (bot/report.py).
+        "media_concorrentes": lowest_bid,
+        "media_prazo": media_prazo,
+        "texto_variante": texto_variante,
     }
     if origem == "ia" and oferta_sugerida_ia != oferta:
         # Guarda o valor bruto sugerido pela IA (antes do desconto competitivo) pra
@@ -169,9 +224,36 @@ def build_proposal(
         resultado["oferta_sugerida_ia"] = oferta_sugerida_ia
 
     log.info(
-        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s%s",
-        project.get("title"), oferta, prazo_dias, origem,
+        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s, texto=%s%s",
+        project.get("title"), oferta, prazo_dias, origem, texto_variante,
         f" (IA sugeriu R${oferta_sugerida_ia})" if "oferta_sugerida_ia" in resultado else "",
     )
 
     return resultado
+
+
+# --- Estilo do texto sorteado por proposta ---
+#
+# 36 propostas no estilo "padrao" renderam 2 respostas e nenhum fechamento. Pra descobrir
+# qual estilo converte melhor, cada proposta sorteia um estilo (pesos em
+# proposal.texto_variantes do config.yaml), gravado em applied_jobs.json junto com o
+# resultado marcado pelo usuário no Telegram (cola o link do projeto no chat do bot e
+# clica "💬 Respondeu"/"🏆 Fechou" — ver notifier._handle_link_action). `python bot/report.py` mostra as taxas por estilo.
+
+
+def _arredondar_para_baixo(valor: float) -> float:
+    """Piso na centena (1230 -> 1200, 770 -> 700); abaixo de R$100, piso na dezena (85 -> 80)."""
+    passo = 100 if valor >= 100 else 10
+    return float(math.floor(valor / passo) * passo)
+
+
+def _sortear_variante_texto(proposal_cfg: dict) -> str:
+    """Sorteia o estilo do texto pelos pesos de proposal.texto_variantes (default: todos iguais)."""
+    pesos = proposal_cfg.get("texto_variantes") or {v: 1 for v in ai_writer.TEXT_VARIANTS}
+    validos = {v: p for v, p in pesos.items() if v in ai_writer.TEXT_VARIANTS and p and p > 0}
+    ignorados = set(pesos) - set(validos)
+    if ignorados:
+        log.warning("texto_variantes: ignorando estilo(s) desconhecido(s)/sem peso: %s", ", ".join(sorted(ignorados)))
+    if not validos:
+        return "padrao"
+    return random.choices(list(validos), weights=list(validos.values()))[0]

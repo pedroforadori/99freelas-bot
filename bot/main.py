@@ -3,6 +3,7 @@ import random
 import signal
 import sys
 import time
+from datetime import datetime, timedelta
 
 import yaml
 from dotenv import load_dotenv
@@ -10,7 +11,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # permite `python bot/main.py`
 
-from bot import approvals, connections, manual_queue, messages, notifier, scraper, submitter
+from bot import approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter
 from bot import site_selectors as sel
 from bot.filter import is_match
 from bot.logger_setup import get_logger
@@ -45,6 +46,63 @@ def load_config() -> dict:
         return yaml.safe_load(f) or {}
 
 
+def _queue_for_approval(project: dict, proposal: dict) -> None:
+    """Manda o pedido de aprovação pro Telegram e enfileira a proposta em approvals."""
+    message_id = notifier.send_approval_request(project, proposal)
+    approvals.add_pending(project, proposal, message_id)
+    log.info(
+        "Aguardando aprovação: '%s' — oferta=R$%s, prazo=%sd, texto=%s",
+        project["title"], proposal["oferta"], proposal["prazo_dias"], proposal.get("texto_variante"),
+    )
+
+
+def _approval_extra(proposal: dict) -> dict:
+    """Estratégia usada na proposta, gravada em applied_jobs.json pra comparar os estilos depois."""
+    campos = (
+        "oferta", "prazo_dias", "origem_valor", "texto_variante",
+        "media_concorrentes", "media_prazo", "ajustado_manualmente",
+    )
+    return {c: proposal[c] for c in campos if proposal.get(c) is not None}
+
+
+def _recheck_awaiting_average(page, config: dict) -> None:
+    """
+    Projetos aderentes que ainda não tinham a média de propostas concorrentes (status
+    "awaiting_average" em applied_jobs.json, com o dict do projeto guardado junto). Checados
+    de novo a cada ciclo de varredura (mesma cadência de CHECK_INTERVAL_*): quando a média
+    aparece (o site mostra a partir de ~5 propostas), monta as propostas e manda pro
+    Telegram. Trava de segurança: desiste depois de proposal.aguardar_media_max_horas.
+    """
+    max_horas = config.get("proposal", {}).get("aguardar_media_max_horas", 48)
+    for project_id, rec in storage.list_by_status("awaiting_average").items():
+        project = rec.get("project")
+        if not project:
+            continue
+        desde = datetime.fromisoformat(rec.get("aguardando_desde") or rec["timestamp"])
+        if datetime.utcnow() - desde > timedelta(hours=max_horas):
+            log.info("Média não apareceu em %sh, desistindo: '%s'", max_horas, project["title"])
+            register_application(project_id, project["title"], status="failed", detail=f"média não apareceu em {max_horas}h")
+            continue
+
+        try:
+            proposal, reason = submitter.prepare_proposal(page, project, config, require_average=True)
+        except Exception as e:
+            log.exception("Erro ao checar média de '%s': %s", project["title"], e)
+            continue
+        if reason == submitter.AGUARDANDO_MEDIA:
+            log.info("Ainda sem média: '%s'", project["title"])
+            continue
+        if proposal is None:
+            log.info("Desistindo de '%s' enquanto aguardava a média — %s", project["title"], reason)
+            notifier.notify_activity(f"🚫 Parou de aguardar: {notifier.esc(project['title'])}\n{notifier.esc(reason)}")
+            register_application(project_id, project["title"], status="failed", detail=reason)
+            continue
+
+        _queue_for_approval(project, proposal)
+        register_application(project_id, project["title"], status="pending_approval", detail="aguardando aprovação no Telegram")
+        time.sleep(random.uniform(3, 8))
+
+
 def run_cycle(page, config: dict) -> None:
     """
     Varredura de projetos novos. NÃO envia proposta nenhuma diretamente — pra cada match,
@@ -60,6 +118,10 @@ def run_cycle(page, config: dict) -> None:
     # Atualiza o saldo real de conexões (lido de /dashboard) uma vez por ciclo — usado
     # por notifier.py pra montar o contador "Conexões usadas: X/Y" nas notificações.
     connections.refresh(page)
+
+    aguardar_media = config.get("proposal", {}).get("aguardar_media", False)
+    if aguardar_media:
+        _recheck_awaiting_average(page, config)
 
     projects = scraper.fetch_open_projects(page)
     new_projects = [p for p in projects if not already_applied(p["id"])]
@@ -84,22 +146,25 @@ def run_cycle(page, config: dict) -> None:
             )
             continue
 
-        proposal, reason = submitter.prepare_proposal(page, project, config)
+        proposal, reason = submitter.prepare_proposal(page, project, config, require_average=aguardar_media)
+        if reason == submitter.AGUARDANDO_MEDIA:
+            # Ainda sem média de concorrentes — espera juntar propostas antes de montar
+            # (preço competitivo). _recheck_awaiting_average checa de novo a cada ciclo.
+            log.info("Aguardando média de propostas: '%s'", project["title"])
+            notifier.notify_activity(f"⏳ Aguardando média de propostas: {notifier.esc(project['title'])}")
+            register_application(
+                project["id"], project["title"], status="awaiting_average", detail=reason,
+                extra={"project": project, "aguardando_desde": datetime.utcnow().isoformat()},
+            )
+            continue
         if proposal is None:
             log.info("Não foi possível preparar proposta: '%s' — %s", project["title"], reason)
             register_application(project["id"], project["title"], status="failed", detail=reason)
             notifier.notify_proposal_result(project, None, "failed", reason)
             continue
 
-        message_id = notifier.send_approval_request(project, proposal)
-        approvals.add_pending(project, proposal, message_id)
+        _queue_for_approval(project, proposal)
         register_application(project["id"], project["title"], status="pending_approval", detail="aguardando aprovação no Telegram")
-        log.info(
-            "Aguardando aprovação: '%s' — oferta=R$%s, prazo=%sd",
-            project["title"],
-            proposal["oferta"],
-            proposal["prazo_dias"],
-        )
         queued_count += 1
 
         # delay curto entre preparos dentro do mesmo ciclo, pra não parecer um robô disparando em rajada
@@ -152,16 +217,9 @@ def process_manual_projects(page, config: dict) -> None:
             manual_queue.remove(project_id)
             continue
 
-        message_id = notifier.send_approval_request(project, proposal)
-        approvals.add_pending(project, proposal, message_id)
+        _queue_for_approval(project, proposal)
         register_application(project_id, project["title"], status="pending_approval", detail="link enviado manualmente")
         manual_queue.remove(project_id)
-        log.info(
-            "Aguardando aprovação (link manual): '%s' — oferta=R$%s, prazo=%sd",
-            project["title"],
-            proposal["oferta"],
-            proposal["prazo_dias"],
-        )
 
 
 def process_pending_approvals(page, config: dict) -> None:
@@ -192,7 +250,7 @@ def process_pending_approvals(page, config: dict) -> None:
         success, detail = submitter.finalize_submission(page, project, proposal)
         status = "sent" if success else "failed"
         log.info("%s (aprovada): '%s' — %s", "ENVIADA" if success else "FALHOU", project.get("title"), detail)
-        register_application(project_id, project["title"], status=status, detail=detail)
+        register_application(project_id, project["title"], status=status, detail=detail, extra=_approval_extra(proposal))
         notifier.finalize_approval_message(message_id, approved=success, detail="" if success else detail)
         if success:
             approvals.resolve(project_id)

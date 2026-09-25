@@ -28,7 +28,14 @@ def already_applied(project_id: str) -> bool:
         return project_id in data["applied"]
 
 
-def register_application(project_id: str, title: str, status: str, detail: str = "") -> None:
+def register_application(
+    project_id: str, title: str, status: str, detail: str = "", extra: dict | None = None
+) -> None:
+    """
+    `extra`: campos adicionais gravados junto no registro — usado pra guardar a estratégia
+    da proposta enviada (versão do teste A/B, oferta, origem do valor, estilo do texto; ver
+    main.process_pending_approvals), base pra comparar as versões depois.
+    """
     with _LOCK:
         data = _load()
         data["applied"][project_id] = {
@@ -36,11 +43,43 @@ def register_application(project_id: str, title: str, status: str, detail: str =
             "status": status,  # "sent" | "failed" | "skipped_duplicate"
             "detail": detail,
             "timestamp": datetime.utcnow().isoformat(),
+            **(extra or {}),
         }
         today = date.today().isoformat()
         if status == "sent":
             data["daily_count"][today] = data["daily_count"].get(today, 0) + 1
         _save(data)
+
+
+def record_outcome(project_id: str, resultado: str) -> str | None:
+    """
+    Grava o resultado de uma proposta enviada ("respondeu" | "fechou"), marcado pelo usuário
+    no Telegram (link colado no chat + botão "💬 Respondeu"/"🏆 Fechou", ver
+    notifier._handle_link_action). "fechou" nunca é rebaixado pra "respondeu".
+    Retorna o resultado final gravado, ou None se o projeto não existir no histórico.
+    """
+    with _LOCK:
+        data = _load()
+        rec = data["applied"].get(project_id)
+        if rec is None:
+            return None
+        if rec.get("resultado") != "fechou":
+            rec["resultado"] = resultado
+            rec["resultado_em"] = datetime.utcnow().isoformat()
+            _save(data)
+        return rec["resultado"]
+
+
+def get_application(project_id: str) -> dict | None:
+    with _LOCK:
+        return _load()["applied"].get(project_id)
+
+
+def list_by_status(status: str) -> dict:
+    """{project_id: registro} de todos os registros com esse status (ex: "awaiting_average")."""
+    with _LOCK:
+        data = _load()
+        return {pid: rec for pid, rec in data["applied"].items() if rec.get("status") == status}
 
 
 def proposals_sent_today() -> int:

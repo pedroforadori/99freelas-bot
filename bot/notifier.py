@@ -17,7 +17,7 @@ import requests
 from bot import ai_writer, approvals, connections, manual_queue, storage
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
-from bot.proposal import ORIGEM_LABELS
+from bot.proposal import ORIGEM_LABELS, TEXTO_VARIANTE_LABELS
 from bot.utils import daily_quota, format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -260,7 +260,20 @@ def _origem_line(proposal: dict) -> str | None:
     oferta_sugerida = proposal.get("oferta_sugerida_ia")
     if oferta_sugerida is not None:
         linha += f"\n<i>(IA sugeriu R$ {format_currency_br(oferta_sugerida)} — desconto competitivo aplicado)</i>"
+    media = proposal.get("media_concorrentes")
+    if media:
+        media_prazo = proposal.get("media_prazo")
+        prazo_txt = f" · {media_prazo} dias" if media_prazo else ""
+        linha += f"\n<i>(média das propostas concorrentes: R$ {format_currency_br(media)}{prazo_txt})</i>"
     return linha
+
+
+def _texto_variante_line(proposal: dict) -> str | None:
+    """Estilo do texto (teste A/B, ver proposal.TEXTO_VARIANTE_LABELS); None em propostas antigas."""
+    variante = proposal.get("texto_variante")
+    if not variante:
+        return None
+    return f"<b>Estilo do texto:</b> {TEXTO_VARIANTE_LABELS.get(variante, variante)}"
 
 
 def notify_proposal_result(
@@ -292,6 +305,9 @@ def notify_proposal_result(
         origem_line = _origem_line(proposal)
         if origem_line:
             linhas.append(origem_line)
+        variante_line = _texto_variante_line(proposal)
+        if variante_line:
+            linhas.append(variante_line)
 
     linhas.append(_propostas_hoje_line(status, simulated))
     linha_conexoes = _conexoes_usadas_line(status, simulated)
@@ -333,6 +349,9 @@ def _approval_text(project: dict, proposal: dict) -> str:
     origem_line = _origem_line(proposal)
     if origem_line:
         valores += f"{origem_line}\n"
+    variante_line = _texto_variante_line(proposal)
+    if variante_line:
+        valores += f"{variante_line}\n"
     # A cota diária não bloqueia mais a fila (ver main.run_cycle) — mostra o ritmo do dia
     # aqui pro usuário decidir se vale gastar uma conexão extra. Pode passar de Y (ex: 11/8).
     valores += f"{_propostas_hoje_line('pending', simulated=False)}\n"
@@ -593,13 +612,17 @@ def _handle_retry_ia_text(callback_id: str, project_id: str, config: dict) -> No
         _answer_callback(callback_id, "Sem descrição completa salva desse projeto — não é possível gerar via IA.")
         return
 
-    texto = ai_writer.generate_proposal_text(entry["project"], full_description, config)
+    texto = ai_writer.generate_proposal_text(
+        entry["project"], full_description, config, variante=proposal.get("texto_variante") or "padrao"
+    )
     if not texto:
         _answer_callback(callback_id, "IA falhou de novo. Tente mais tarde ou aprove com o texto atual.")
         return
 
     proposal["texto"] = texto
     proposal["texto_ia_falhou"] = False
+    if proposal.get("texto_variante") in (None, "template"):
+        proposal["texto_variante"] = "padrao"
     if not approvals.update_proposal(project_id, proposal):
         _answer_callback(callback_id, "Já decidido ou expirado — não é possível gerar de novo.")
         return
@@ -627,9 +650,11 @@ _PROJECT_LINK_REGEX = re.compile(r"https?://(?:www\.)?99freelas\.com\.br/project
 def _handle_project_link(message: dict) -> None:
     """
     Mensagem solta (não é reply a um prompt de edição) com link de projeto do 99Freelas:
-    enfileira em manual_queue pra main.process_manual_projects preparar a proposta e mandar
-    o pedido de aprovação, igual a um projeto novo da varredura (sem passar pelo filtro do
-    config.yaml — decisão do usuário: se mandou o link, quer propor). Só aceita mensagens
+    responde com um menu de botões (_link_menu_keyboard) pra o usuário escolher o que fazer
+    com o projeto — "📝 Preparar proposta" (enfileira em manual_queue, igual a um projeto
+    novo da varredura, sem passar pelo filtro do config.yaml), "💬 Respondeu" ou
+    "🏆 Fechou" (marcam o resultado de uma proposta já enviada — ver
+    _record_outcome_from_link). Nada acontece até o clique. Só aceita mensagens
     do próprio TELEGRAM_CHAT_ID — qualquer um pode escrever pro bot, e isso gasta conexão
     se aprovado. Qualquer outra mensagem é ignorada sem aviso.
     """
@@ -645,10 +670,93 @@ def _handle_project_link(message: dict) -> None:
 
     for project_id, slug in matches.items():
         url = f"https://www.99freelas.com.br/project/{slug.lower()}"
-        if manual_queue.add(project_id, url):
-            _send_telegram(f"📥 Link recebido — preparando proposta pro projeto {project_id}...")
-        else:
-            _send_telegram(f"📥 Projeto {project_id} já está na fila, aguarde.")
+        rec = storage.get_application(project_id)
+        linhas = [f"🔗 <b>{esc(rec['title']) if rec and rec.get('title') else 'Projeto ' + project_id}</b>", url]
+        if rec:
+            linhas.append(f"<b>Situação:</b> {esc(_LINK_STATUS_LABELS.get(rec.get('status'), rec.get('status', '')))}")
+            if rec.get("texto_variante"):
+                estilo = TEXTO_VARIANTE_LABELS.get(rec["texto_variante"], rec["texto_variante"])
+                linhas.append(f"<b>Estilo do texto:</b> {esc(estilo)}")
+            if rec.get("resultado"):
+                linhas.append(f"<b>Resultado marcado:</b> {rec['resultado']}")
+        linhas.append("O que fazer com esse projeto?")
+        _send_telegram("\n".join(linhas), _link_menu_keyboard(project_id))
+
+
+_LINK_STATUS_LABELS = {
+    "sent": "proposta enviada",
+    "pending_approval": "aguardando sua aprovação",
+    "awaiting_average": "aguardando a média de propostas",
+    "rejected_by_user": "rejeitada por você",
+    "failed": "falhou",
+    "skipped_duplicate": "ignorado pelo filtro",
+}
+
+
+def _link_menu_keyboard(project_id: str) -> dict:
+    """Menu mandado em resposta a um link colado no chat (ver _handle_project_link)."""
+    return {
+        "inline_keyboard": [
+            [{"text": "📝 Preparar proposta", "callback_data": f"link:p:{project_id}"}],
+            [
+                {"text": "💬 Respondeu", "callback_data": f"link:r:{project_id}"},
+                {"text": "🏆 Fechou", "callback_data": f"link:f:{project_id}"},
+            ],
+        ]
+    }
+
+
+def _record_outcome_from_link(project_id: str, resultado: str) -> tuple[bool, str]:
+    """
+    Grava "respondeu"/"fechou" no registro do projeto em applied_jobs.json
+    (storage.record_outcome), junto do estilo de texto que já está lá — é o que
+    bot/report.py usa pra comparar os estilos. O bot não consegue saber sozinho qual
+    cliente respondeu (o site só mostra o total de mensagens não lidas). Retorna
+    (gravou, texto pro usuário).
+    """
+    rec = storage.get_application(project_id)
+    if rec is None or rec.get("status") != "sent":
+        return False, "Esse projeto não consta como proposta enviada — nada marcado."
+    gravado = storage.record_outcome(project_id, resultado)
+    return True, "🏆 Marcado: projeto fechado" if gravado == "fechou" else "💬 Marcado: cliente respondeu"
+
+
+def _handle_link_action(callback_id: str, kind: str, project_id: str, message: dict) -> None:
+    """Clique num botão do menu de link (ver _link_menu_keyboard)."""
+    if kind == "p":
+        match = _PROJECT_LINK_REGEX.search(message.get("text", ""))
+        if not match:
+            _answer_callback(callback_id, "Não achei o link nessa mensagem — cole o link de novo.")
+            return
+        pending = approvals.get_pending(project_id)
+        if pending is not None and pending["decision"] is None:
+            _answer_callback(callback_id, "Esse projeto já está aguardando sua aprovação.")
+            return
+        url = f"https://www.99freelas.com.br/project/{match.group(1).lower()}"
+        if not manual_queue.add(project_id, url):
+            _answer_callback(callback_id, "Esse projeto já está na fila, aguarde.")
+            return
+        ack, label = "Preparando a proposta...", "⏳ Preparando proposta..."
+    elif kind in ("r", "f"):
+        ok, ack = _record_outcome_from_link(project_id, "fechou" if kind == "f" else "respondeu")
+        if not ok:
+            _answer_callback(callback_id, ack)
+            return
+        label = ack
+    else:
+        _answer_callback(callback_id)
+        return
+
+    if message.get("message_id"):
+        _telegram_call(
+            "editMessageReplyMarkup",
+            {
+                "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
+                "message_id": message["message_id"],
+                "reply_markup": {"inline_keyboard": [[{"text": label, "callback_data": "noop"}]]},
+            },
+        )
+    _answer_callback(callback_id, ack)
 
 
 def notify_manual_project_failed(url: str, reason: str, retry: bool = True) -> None:
@@ -726,6 +834,11 @@ def _handle_callback(callback: dict, config: dict) -> None:
     if parts[0] == "editf" and len(parts) == 3:
         _, field, project_id = parts
         _handle_edit_request(callback_id, field, project_id)
+        return
+
+    if parts[0] == "link" and len(parts) == 3:
+        _, kind, project_id = parts
+        _handle_link_action(callback_id, kind, project_id, callback.get("message", {}))
         return
 
     if parts[0] == "retryia" and len(parts) == 2:

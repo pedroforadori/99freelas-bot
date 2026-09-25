@@ -22,7 +22,8 @@ _URL_PATTERN = re.compile(r"(https?://|www\.)\S+", re.IGNORECASE)
 _PHONE_PATTERN = re.compile(r"(\(?\d{2}\)?\s?)?9?\d{4}[-.\s]?\d{4}")
 _MAX_CHARS = 2900  # abaixo do maxlength=3000 do campo #proposta, com margem
 
-_SYSTEM_PROMPT = (
+# Regras de segurança/conteúdo comuns a TODOS os estilos de texto (ver _TEXT_VARIANTS).
+_SYSTEM_PROMPT_BASE = (
     "Você escreve propostas de freelancer para projetos no 99Freelas, em português do "
     "Brasil. Regras OBRIGATÓRIAS, sem exceção:\n"
     "- NUNCA inclua e-mail, telefone, WhatsApp, redes sociais, links ou qualquer forma de contato.\n"
@@ -34,11 +35,81 @@ _SYSTEM_PROMPT = (
     "termos de arquitetura (ex: React, Node.js, SOLID, DDD, API, JWT, GraphQL) — o cliente "
     "geralmente é leigo em tecnologia. Fale do problema dele e de como você resolve, em "
     "linguagem simples e acessível, não da stack técnica.\n"
-    "- Tom profissional e direto, focado em como você resolveria o problema descrito pelo cliente.\n"
-    "- No máximo 1500 caracteres. Poucos parágrafos, sem saudação genérica excessiva nem "
-    "fechamento floreado.\n"
-    "- Responda APENAS com o texto da proposta, sem comentários extras."
 )
+
+# Estilo do texto — sorteado por proposta (ver proposal._sortear_variante_texto) pra
+# descobrir qual estilo converte melhor. "padrao" é o estilo original (grupo de controle):
+# _SYSTEM_PROMPT continua idêntico ao de antes do teste.
+_TEXT_VARIANTS = {
+    "padrao": (
+        "- Tom profissional e direto, focado em como você resolveria o problema descrito pelo cliente.\n"
+        "- No máximo 1500 caracteres. Poucos parágrafos, sem saudação genérica excessiva nem "
+        "fechamento floreado.\n"
+    ),
+    "pergunta": (
+        "- Texto CURTO: no máximo 600 caracteres, 2 ou 3 parágrafos curtos.\n"
+        "- A primeira frase já fala do problema específico do cliente, usando os termos da "
+        "descrição dele — nada de 'Olá, tenho interesse no seu projeto' nem apresentação genérica.\n"
+        "- Em 1 ou 2 frases, diga de forma concreta como você resolveria.\n"
+        "- Termine com UMA pergunta específica sobre o projeto (um detalhe que realmente "
+        "faltou na descrição), que convide o cliente a responder.\n"
+    ),
+    "plano": (
+        "- Primeira frase: resuma em uma linha o que o cliente precisa, com os termos da "
+        "descrição dele — sem saudação genérica.\n"
+        "- Em seguida, liste de 3 a 4 etapas numeradas do que você vai fazer, cada uma numa "
+        "linha curta e em linguagem simples.\n"
+        "- Feche com uma frase dizendo o que o cliente terá em mãos ao final.\n"
+        "- No máximo 1000 caracteres.\n"
+    ),
+    "minimo": (
+        "- Texto MUITO curto: 2 ou 3 frases, no máximo 300 caracteres.\n"
+        "- Primeira frase: o problema específico do cliente, com os termos da descrição dele. "
+        "Segunda: como você resolve, de forma concreta. Se couber, uma terceira bem curta "
+        "mostrando disponibilidade pra começar.\n"
+        "- Sem saudação e sem despedida.\n"
+    ),
+    "resultado": (
+        "- Foque no RESULTADO pro cliente, não nas tarefas: descreva como vai ficar a situação "
+        "dele depois do trabalho pronto (o que ele passa a conseguir fazer, o que deixa de ser "
+        "problema).\n"
+        "- Use exemplos concretos tirados da descrição dele.\n"
+        "- Sem saudação genérica. No máximo 900 caracteres.\n"
+    ),
+    "diagnostico": (
+        "- Comece mostrando em uma frase que entendeu o pedido, com os termos do cliente.\n"
+        "- Aponte UM cuidado ou risco importante que esse tipo de projeto costuma ter e que o "
+        "cliente talvez não tenha mencionado, e diga como você vai tratar isso — em linguagem "
+        "simples.\n"
+        "- Não critique o cliente nem a descrição dele.\n"
+        "- No máximo 900 caracteres.\n"
+    ),
+    "opcoes": (
+        "- Resuma em uma frase o que o cliente precisa.\n"
+        "- Ofereça dois caminhos: um mais enxuto e um mais completo, cada um em uma ou duas "
+        "frases dizendo o que inclui — SEM falar de valor ou prazo de nenhum dos dois.\n"
+        "- Termine perguntando qual dos dois caminhos faz mais sentido pra ele.\n"
+        "- No máximo 1000 caracteres.\n"
+    ),
+    "conversa": (
+        "- Tom informal e próximo, em primeira pessoa, como uma mensagem de conversa — sem "
+        "cara de proposta formal e sem listas.\n"
+        "- Mostre que entendeu o que o cliente quer, com os termos dele, e diga com "
+        "naturalidade como você faria.\n"
+        "- Continue respeitoso: sem gírias e sem emojis.\n"
+        "- No máximo 800 caracteres.\n"
+    ),
+}
+TEXT_VARIANTS = tuple(_TEXT_VARIANTS)
+
+_RESPONDA_APENAS_TEXTO = "- Responda APENAS com o texto da proposta, sem comentários extras."
+
+
+def _text_system_prompt(variante: str) -> str:
+    return _SYSTEM_PROMPT_BASE + _TEXT_VARIANTS[variante] + _RESPONDA_APENAS_TEXTO
+
+
+_SYSTEM_PROMPT = _text_system_prompt("padrao")
 
 _PRICE_SYSTEM_PROMPT = (
     "Você sugere valor e prazo de proposta para projetos de freelancer no 99Freelas, em "
@@ -158,11 +229,17 @@ _PROVIDERS = {
 }
 
 
-def generate_proposal_text(project: dict, full_description: str, config: dict) -> str | None:
+def generate_proposal_text(
+    project: dict, full_description: str, config: dict, variante: str = "padrao"
+) -> str | None:
     """
     Retorna o texto gerado, ou None se a API falhar ou o texto violar as regras de
     segurança — nesses casos o chamador (bot/proposal.py) deve cair pro template fixo.
+    `variante` escolhe o estilo do texto (ver _TEXT_VARIANTS); desconhecida → "padrao".
     """
+    if variante not in _TEXT_VARIANTS:
+        log.warning("Estilo de texto '%s' desconhecido — usando 'padrao'.", variante)
+        variante = "padrao"
     proposal_cfg = config.get("proposal", {})
     provider_name = proposal_cfg.get("ia_provider", "anthropic")
     provider = _PROVIDERS.get(provider_name)
@@ -175,7 +252,7 @@ def generate_proposal_text(project: dict, full_description: str, config: dict) -
     skills = config.get("keywords_include", [])
     user_prompt = _build_user_prompt(project, full_description, skills)
 
-    text = generate_fn(user_prompt, model)
+    text = generate_fn(user_prompt, model, system_prompt=_text_system_prompt(variante))
     if not text:
         log.warning("IA (%s) retornou texto vazio ou falhou.", provider_name)
         return None

@@ -11,6 +11,12 @@ from bot.utils import format_currency_br, parse_currency
 log = get_logger(__name__)
 
 _AVG_PROPOSAL_VALUE_PATTERN = re.compile(r"Valor médio das propostas:?\s*R\$\s*([\d.,]+)", re.IGNORECASE)
+_AVG_DURATION_PATTERN = re.compile(r"Duração média estimada:?\s*(\d+)", re.IGNORECASE)
+
+# Motivo devolvido por prepare_proposal(require_average=True) quando o projeto ainda não
+# tem a média de propostas concorrentes — main.run_cycle guarda o projeto como
+# "awaiting_average" e checa de novo a cada ciclo (ver main._recheck_awaiting_average).
+AGUARDANDO_MEDIA = "aguardando média de propostas concorrentes"
 
 
 def _finish(
@@ -35,6 +41,18 @@ def _read_lowest_bid(page: Page) -> float | None:
     if not match:
         return None
     return parse_currency(match.group(1))
+
+
+def _read_average_duration(page: Page) -> int | None:
+    """
+    "Duração média estimada: <b>10 dias</b>" — mesmo bloco (PROPOSAL_LOWEST_BID) da média
+    de valor, com a mesma ressalva: só existe depois de propostas suficientes.
+    """
+    el = page.query_selector(sel.PROPOSAL_LOWEST_BID)
+    if not el:
+        return None
+    match = _AVG_DURATION_PATTERN.search(el.inner_text())
+    return int(match.group(1)) if match else None
 
 
 def _read_full_description(page: Page) -> str | None:
@@ -111,7 +129,9 @@ def login(page: Page, email: str, password: str) -> bool:
     return False
 
 
-def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | None, str]:
+def prepare_proposal(
+    page: Page, project: dict, config: dict, require_average: bool = False
+) -> tuple[dict | None, str]:
     """
     Abre a página do projeto, monta a proposta completa (oferta, prazo, texto) SEM
     preencher nem enviar nada. Usada tanto pelo fluxo de aprovação (main.run_cycle, que
@@ -121,6 +141,10 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
     Retorna (proposal, "ok") em sucesso, ou (None, motivo) em qualquer falha — projeto já
     candidatado, sem plano Premium, botão não encontrado, ou build_proposal não conseguiu
     montar um preço (ver bot/proposal.py).
+
+    require_average: se True e a página de envio ainda não mostrar a média de propostas
+    concorrentes, retorna (None, AGUARDANDO_MEDIA) ANTES de chamar qualquer IA — usado pela
+    varredura com proposal.aguardar_media (ver main.run_cycle).
     """
     page.goto(project["url"], wait_until="networkidle")
 
@@ -161,7 +185,12 @@ def prepare_proposal(page: Page, project: dict, config: dict) -> tuple[dict | No
         return None, "botão 'Enviar proposta' não encontrado (projeto pode ter fechado)"
 
     lowest_bid = _read_lowest_bid(page)
-    proposal = build_proposal(project, config, lowest_bid=lowest_bid, full_description=full_description)
+    if require_average and lowest_bid is None:
+        return None, AGUARDANDO_MEDIA
+    media_prazo = _read_average_duration(page)
+    proposal = build_proposal(
+        project, config, lowest_bid=lowest_bid, full_description=full_description, media_prazo=media_prazo
+    )
     if proposal is None:
         return None, "sem dado de preço concorrente/orçamento e a IA não sugeriu um valor coerente"
 
