@@ -1,0 +1,27 @@
+{
+  "keyboard": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "editf:o:785400",
+          "text": "✏️ Editar oferta"
+        },
+        {
+          "callback_data": "editf:p:785400",
+          "text": "✏️ Editar prazo"
+        }
+      ],
+      [
+        {
+          "callback_data": "approve:785400",
+          "text": "✅ Aprovar"
+        },
+        {
+          "callback_data": "reject:785400",
+          "text": "❌ Rejeitar"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[99Freelas]</b> 🆕 <b>Nova proposta pra aprovar</b>\n<b>Projeto:</b> Site institucional & landing <page>\n<b>Link:</b> https://www.99freelas.com.br/project/site-institucional-785400\n<b>Oferta:</b> R$ 1000,00\n<b>Prazo:</b> 8 dias\n<b>Origem do valor/prazo:</b> 🤖 Sugerido pela IA (sem orçamento do cliente nem propostas concorrentes)\n<i>(IA sugeriu R$ 2400,00 — desconto competitivo aplicado)</i>\n<b>Estilo do texto:</b> curto + pergunta ao cliente\n<b>Hoje:</b> 0/8\n\n<b>Descrição do projeto:</b>\nPreciso de um site institucional com 5 páginas.\n\n<b>Proposta:</b>\nOlá! Posso te ajudar com esse site."
+}

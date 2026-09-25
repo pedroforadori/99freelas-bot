@@ -1,0 +1,30 @@
+[
+  [
+    "sendMessage",
+    {
+      "disable_web_page_preview": true,
+      "parse_mode": "HTML",
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "link:p:785400",
+              "text": "📝 Preparar proposta"
+            }
+          ],
+          [
+            {
+              "callback_data": "link:r:785400",
+              "text": "💬 Respondeu"
+            },
+            {
+              "callback_data": "link:f:785400",
+              "text": "🏆 Fechou"
+            }
+          ]
+        ]
+      },
+      "text": "<b>[99Freelas]</b> 🔗 <b>Site institucional</b>\nhttps://www.99freelas.com.br/project/site-institucional-785400\n<b>Situação:</b> proposta enviada\n<b>Estilo do texto:</b> etapas numeradas\n<b>Resultado marcado:</b> respondeu\nO que fazer com esse projeto?"
+    }
+  ]
+]

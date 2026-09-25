@@ -1,0 +1,27 @@
+[
+  {
+    "disable_web_page_preview": true,
+    "parse_mode": "HTML",
+    "text": "<b>[GitHub]</b> 🔗 <b>Vaga nova sem e-mail</b> — candidatura pelo link\n<b>Vaga:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Link:</b> https://github.com/frontendbr/vagas/issues/123"
+  },
+  {
+    "disable_web_page_preview": true,
+    "parse_mode": "HTML",
+    "text": "<b>[GitHub]</b> ✅ E-mail enviado\n<b>Vaga:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Link:</b> https://github.com/frontendbr/vagas/issues/123\n<b>Para:</b> vagas@acme.com\n<b>Detalhe:</b> e-mail enviado pra vagas@acme.com"
+  },
+  {
+    "disable_web_page_preview": true,
+    "parse_mode": "HTML",
+    "reply_markup": {
+      "inline_keyboard": [
+        [
+          {
+            "callback_data": "retry:gh-frontendbr/vagas#123",
+            "text": "🔄 Tentar de novo"
+          }
+        ]
+      ]
+    },
+    "text": "<b>[GitHub]</b> ⚠️ Falha ao enviar e-mail\n<b>Vaga:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Link:</b> https://github.com/frontendbr/vagas/issues/123\n<b>Para:</b> vagas@acme.com\n<b>Detalhe:</b> erro SMTP: boom &lt;x&gt;"
+  }
+]

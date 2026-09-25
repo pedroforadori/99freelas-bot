@@ -1,0 +1,56 @@
+[
+  [
+    "sendMessage",
+    {
+      "parse_mode": "HTML",
+      "reply_markup": {
+        "force_reply": true,
+        "selective": true
+      },
+      "text": "<b>[GitHub]</b> Digite o e-mail de destino (ex: vagas@empresa.com):\n<i>[Remoto] Dev Front-end Sênior na ACME</i>"
+    }
+  ],
+  [
+    "answerCallbackQuery",
+    {
+      "callback_query_id": "cb1"
+    }
+  ],
+  [
+    "editMessageText",
+    {
+      "disable_web_page_preview": true,
+      "message_id": 556,
+      "parse_mode": "HTML",
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "editf:e:gh-frontendbr/vagas#123",
+              "text": "✏️ Editar destinatário"
+            }
+          ],
+          [
+            {
+              "callback_data": "approve:gh-frontendbr/vagas#123",
+              "text": "✅ Aprovar e enviar"
+            },
+            {
+              "callback_data": "reject:gh-frontendbr/vagas#123",
+              "text": "❌ Rejeitar"
+            }
+          ]
+        ]
+      },
+      "text": "<b>[GitHub]</b> 📧 <b>Vaga pra aprovar (e-mail)</b>\n<b>Vaga:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Link:</b> https://github.com/frontendbr/vagas/issues/123\n<b>Repo:</b> frontendbr/vagas · Sênior, Remoto\n\n<b>Para:</b> rh@acme.com · editado por você\n<b>Assunto:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Anexo:</b> nenhum (github_jobs.email.anexo vazio)\n\n<b>Descrição da vaga:</b>\n## Descrição\nVaga legal.\n\n## Como se candidatar\nMande e-mail pra vagas@acme.com\n\n<b>E-mail:</b>\nOlá! Segue meu currículo."
+    }
+  ],
+  [
+    "sendMessage",
+    {
+      "disable_web_page_preview": true,
+      "parse_mode": "HTML",
+      "text": "<b>[GitHub]</b> Destinatário atualizado: rh@acme.com"
+    }
+  ]
+]

@@ -1,0 +1,25 @@
+[
+  [
+    "editMessageReplyMarkup",
+    {
+      "message_id": 881,
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "noop",
+              "text": "💬 Marcado: cliente respondeu"
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  [
+    "answerCallbackQuery",
+    {
+      "callback_query_id": "cb1",
+      "text": "💬 Marcado: cliente respondeu"
+    }
+  ]
+]

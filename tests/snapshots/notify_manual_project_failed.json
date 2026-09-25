@@ -1,0 +1,22 @@
+[
+  {
+    "disable_web_page_preview": true,
+    "parse_mode": "HTML",
+    "reply_markup": {
+      "inline_keyboard": [
+        [
+          {
+            "callback_data": "retry:785500",
+            "text": "🔄 Tentar de novo"
+          }
+        ]
+      ]
+    },
+    "text": "<b>[99Freelas]</b> ⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> https://www.99freelas.com.br/project/site-legal-785500\n<b>Motivo:</b> projeto foi fechado"
+  },
+  {
+    "disable_web_page_preview": true,
+    "parse_mode": "HTML",
+    "text": "<b>[99Freelas]</b> ⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> https://www.99freelas.com.br/project/site-legal-785500\n<b>Motivo:</b> já aguardando"
+  }
+]

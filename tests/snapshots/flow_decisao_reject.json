@@ -1,0 +1,25 @@
+[
+  [
+    "editMessageReplyMarkup",
+    {
+      "message_id": 555,
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "noop",
+              "text": "⏳ Processando..."
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  [
+    "answerCallbackQuery",
+    {
+      "callback_query_id": "cb1",
+      "text": "Rejeitado ❌"
+    }
+  ]
+]

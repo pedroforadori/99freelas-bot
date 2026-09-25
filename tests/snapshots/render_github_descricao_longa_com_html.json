@@ -1,0 +1,23 @@
+{
+  "keyboard": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "editf:e:gh-frontendbr/vagas#123",
+          "text": "✏️ Editar destinatário"
+        }
+      ],
+      [
+        {
+          "callback_data": "approve:gh-frontendbr/vagas#123",
+          "text": "✅ Aprovar e enviar"
+        },
+        {
+          "callback_data": "reject:gh-frontendbr/vagas#123",
+          "text": "❌ Rejeitar"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[GitHub]</b> 📧 <b>Vaga pra aprovar (e-mail)</b>\n<b>Vaga:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Link:</b> https://github.com/frontendbr/vagas/issues/123\n<b>Repo:</b> frontendbr/vagas · Sênior, Remoto\n\n<b>Para:</b> vagas@acme.com\n<b>Assunto:</b> [Remoto] Dev Front-end Sênior na ACME\n<b>Anexo:</b> nenhum (github_jobs.email.anexo vazio)\n\n<b>Descrição da vaga:</b>\na &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a &amp; b &lt; c a … (veja mais no link)\n\n<b>E-mail:</b>\nOi &lt;b&gt;&amp;&lt;/b&gt;"
+}

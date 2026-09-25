@@ -1,0 +1,25 @@
+[
+  [
+    "editMessageReplyMarkup",
+    {
+      "message_id": 777,
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "noop",
+              "text": "⏳ Reenviando..."
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  [
+    "answerCallbackQuery",
+    {
+      "callback_query_id": "cb1",
+      "text": "Reenviando a proposta aprovada..."
+    }
+  ]
+]

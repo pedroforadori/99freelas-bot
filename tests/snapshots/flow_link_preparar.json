@@ -1,0 +1,25 @@
+[
+  [
+    "editMessageReplyMarkup",
+    {
+      "message_id": 880,
+      "reply_markup": {
+        "inline_keyboard": [
+          [
+            {
+              "callback_data": "noop",
+              "text": "⏳ Preparando proposta..."
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  [
+    "answerCallbackQuery",
+    {
+      "callback_query_id": "cb1",
+      "text": "Preparando a proposta..."
+    }
+  ]
+]
