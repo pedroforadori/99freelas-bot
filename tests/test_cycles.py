@@ -178,6 +178,31 @@ def test_manual_ja_aguardando(api, telegram, site):
     assert "já está aguardando" in telegram.last("sendMessage")["text"]
 
 
+def test_manual_cancelar_proposta(api, telegram, site):
+    storage.register_application(PID, "Site", status="sent", extra={"texto_variante": "plano"})
+    manual_queue.add(PID, LINK, action="cancel")
+    chamadas = []
+    api.patch_submitter("cancel_proposal", lambda page, url: chamadas.append(url) or (True, "proposta cancelada"))
+    api.process_manual_projects({"proposal": {}})
+    assert chamadas == [LINK]
+    assert site["prepare_calls"] == []
+    assert manual_queue.peek_all() == []
+    rec = storage.get_application(PID)
+    assert rec["status"] == "cancelled_by_user"
+    assert rec["texto_variante"] == "plano"
+    assert "Proposta cancelada" in telegram.last("sendMessage")["text"]
+
+
+def test_manual_cancelar_falha_mantem_registro(api, telegram, site):
+    storage.register_application(PID, "Site", status="sent")
+    manual_queue.add(PID, LINK, action="cancel")
+    api.patch_submitter("cancel_proposal", lambda page, url: (False, "não há proposta ativa sua nesse projeto pra cancelar"))
+    api.process_manual_projects({"proposal": {}})
+    assert manual_queue.peek_all() == []
+    assert storage.get_application(PID)["status"] == "sent"
+    assert "Não consegui cancelar" in telegram.last("sendMessage")["text"]
+
+
 # --- GitHub --------------------------------------------------------------------------------
 
 

@@ -322,6 +322,26 @@ def test_link_resultado_projeto_nao_enviado(api, telegram):
     assert not telegram.of("editMessageReplyMarkup")
 
 
+def test_link_cancelar_pede_confirmacao_e_volta(api, telegram):
+    telegram.push_callback(f"link:c:{PID}", message_id=882, text=LINK)
+    api.poll(CONFIG)
+    teclado = telegram.last("editMessageReplyMarkup")["reply_markup"]["inline_keyboard"]
+    assert teclado[0][0]["callback_data"] == f"link:x:{PID}"
+    assert manual_queue.peek_all() == []
+
+    telegram.push_callback(f"link:m:{PID}", message_id=882, text=LINK)
+    api.poll(CONFIG)
+    teclado = telegram.last("editMessageReplyMarkup")["reply_markup"]["inline_keyboard"]
+    assert teclado[0][0]["callback_data"] == f"link:p:{PID}"
+
+
+def test_link_cancelar_confirmado_enfileira(api, telegram):
+    telegram.push_callback(f"link:x:{PID}", message_id=883, text=LINK)
+    api.poll(CONFIG)
+    assert manual_queue.peek_all()[0]["action"] == "cancel"
+    assert telegram.last("answerCallbackQuery")["text"] == "Cancelando a proposta..."
+
+
 def test_link_preparar_ja_aguardando(api, telegram, pending_99):
     telegram.push_callback(f"link:p:{PID}", text=LINK)
     api.poll(CONFIG)

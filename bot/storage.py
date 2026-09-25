@@ -70,6 +70,19 @@ def record_outcome(project_id: str, resultado: str) -> str | None:
         return rec["resultado"]
 
 
+def update_status(project_id: str, title: str, status: str, detail: str = "") -> None:
+    """
+    Troca o status mantendo os demais campos do registro (oferta, estilo do texto etc.) —
+    usado ao cancelar uma proposta já enviada. Não mexe em daily_count (a conexão já foi
+    gasta).
+    """
+    with _LOCK:
+        data = _load()
+        rec = data["applied"].setdefault(project_id, {"title": title})
+        rec.update(status=status, detail=detail, timestamp=datetime.utcnow().isoformat())
+        _save(data)
+
+
 def get_application(project_id: str) -> dict | None:
     with _LOCK:
         return _load()["applied"].get(project_id)

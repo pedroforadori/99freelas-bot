@@ -279,6 +279,36 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         return _finish(project, proposal, False, f"erro inesperado ao enviar proposta: {e}", simulated=dry_run)
 
 
+def cancel_proposal(page: Page, url: str) -> tuple[bool, str]:
+    """
+    Cancela a proposta já enviada pra um projeto, clicando em "Cancelar proposta"
+    (PROPOSAL_CANCEL_LINK) na página do projeto. Só chamada a partir do botão
+    "🗑️ Cancelar proposta" do menu de link, depois da confirmação no Telegram.
+
+    Ainda não se sabe se o site pede confirmação ao clicar: um confirm() nativo do
+    navegador é aceito automaticamente; um modal próprio do site não — por isso o sucesso
+    só é declarado depois de recarregar a página e ver que o link sumiu.
+    """
+    page.goto(url, wait_until="networkidle")
+    if not page.query_selector(sel.PROPOSAL_CANCEL_LINK):
+        return False, "não há proposta ativa sua nesse projeto pra cancelar"
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click(sel.PROPOSAL_CANCEL_LINK, timeout=8000)
+    try:
+        page.wait_for_load_state("networkidle", timeout=8000)
+    except PlaywrightTimeoutError:
+        pass  # a checagem abaixo (página recarregada) é que decide
+
+    page.goto(url, wait_until="networkidle")
+    if page.query_selector(sel.PROPOSAL_CANCEL_LINK):
+        return False, (
+            "cliquei em 'Cancelar proposta' mas ela continua lá — o site pode pedir uma "
+            "confirmação que o bot não conhece; confira no site"
+        )
+    return True, "proposta cancelada"
+
+
 def submit_proposal(page: Page, project: dict, config: dict, dry_run: bool = False) -> tuple[bool, str]:
     """
     Compõe prepare_proposal + finalize_submission num único passo — usada por

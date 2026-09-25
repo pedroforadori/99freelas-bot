@@ -24,7 +24,7 @@ def test_script_importa(script):
     assert result.returncode == 0, result.stderr[-2000:]
 
 
-@pytest.mark.parametrize("module", ["bot.submitter", "bot.messages", "bot.notifier", "bot.approvals"])
+@pytest.mark.parametrize("module", ["bot.submitter", "bot.messages", "bot.notifier", "bot.approvals", "bot.sources.apinfo.source"])
 def test_modulo_importa_primeiro(module):
     """Cada módulo importado sozinho, primeiro, num processo limpo (ordem de import expõe ciclos)."""
     result = subprocess.run(

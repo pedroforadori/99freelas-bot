@@ -14,7 +14,7 @@ from tests.conftest import FREELAS99, GITHUB
 
 def test_toda_fonte_registrada_e_completa():
     nomes = [s.name for s in registry.ALL_SOURCES]
-    assert nomes == ["99freelas", "github"]
+    assert nomes == ["99freelas", "github", "apinfo"]
     for source in registry.ALL_SOURCES:
         assert source.tag.startswith("<b>[") and source.tag.endswith("]</b>")
         codes = [f.code for f in source.editable_fields]

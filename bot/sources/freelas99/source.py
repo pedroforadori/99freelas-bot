@@ -230,6 +230,11 @@ class Freelas99Source(JobSource):
         for item in manual_queue.peek_all():
             project_id, url = item["id"], item["url"]
 
+            if item.get("action") == "cancel":
+                self._cancel_manual(project_id, url)
+                manual_queue.remove(project_id)
+                continue
+
             pending = approvals.get_pending(project_id)
             if pending is not None and pending["decision"] is None:
                 views.notify_manual_project_failed(
@@ -266,6 +271,20 @@ class Freelas99Source(JobSource):
 
             self._queue(project, proposal, detail="link enviado manualmente")
             manual_queue.remove(project_id)
+
+    def _cancel_manual(self, project_id: str, url: str) -> None:
+        """Cancela no site a proposta já enviada (botão "🗑️ Cancelar proposta" do menu de link)."""
+        rec = storage.get_application(project_id)
+        title = (rec or {}).get("title") or ""
+        try:
+            ok, detail = submitter.cancel_proposal(self.page, url)
+        except Exception as e:
+            log.exception("Erro ao cancelar proposta %s: %s", url, e)
+            ok, detail = False, f"erro inesperado: {e}"
+        log.info("Cancelamento de proposta %s: %s — %s", url, "OK" if ok else "FALHOU", detail)
+        if ok:
+            storage.update_status(project_id, title or url, "cancelled_by_user", detail="cancelada pelo usuário via Telegram")
+        views.notify_cancel_result(url, title, ok, detail)
 
     # --- aprovação -------------------------------------------------------------------------
 
@@ -349,7 +368,8 @@ class Freelas99Source(JobSource):
     def handle_message(self, message: dict) -> bool:
         """
         Mensagem solta com link de projeto do 99Freelas: responde com um menu
-        (views.send_link_menu) — "📝 Preparar proposta", "💬 Respondeu" ou "🏆 Fechou".
+        (views.send_link_menu) — "📝 Preparar proposta", "💬 Respondeu", "🏆 Fechou" ou
+        "🗑️ Cancelar proposta" (com confirmação; o clique no site acontece no tick).
         Nada acontece até o clique. Só aceita mensagens do próprio TELEGRAM_CHAT_ID —
         qualquer um pode escrever pro bot, e preparar proposta gasta conexão se aprovada.
         """
@@ -370,11 +390,26 @@ class Freelas99Source(JobSource):
     def _on_link_action(self, cb: Callback) -> None:
         """Clique num botão do menu de link (ver views.link_menu_keyboard)."""
         kind, project_id = cb.args
+        message_id = cb.message.get("message_id")
+        if kind in ("c", "m"):
+            # "c": pede confirmação antes de cancelar; "m": "↩️ Voltar" pro menu.
+            keyboard = views.cancel_confirm_keyboard(project_id) if kind == "c" else views.link_menu_keyboard(project_id)
+            if message_id:
+                telegram_api.edit_reply_markup(message_id, keyboard)
+            cb.answer()
+            return
         if kind == "p":
             result = self._enqueue_from_message(cb, project_id, "Não achei o link nessa mensagem — cole o link de novo.")
             if result is None:
                 return
             ack, label = "Preparando a proposta...", "⏳ Preparando proposta..."
+        elif kind == "x":
+            result = self._enqueue_from_message(
+                cb, project_id, "Não achei o link nessa mensagem — cole o link de novo.", action="cancel"
+            )
+            if result is None:
+                return
+            ack, label = "Cancelando a proposta...", "⏳ Cancelando proposta..."
         elif kind in ("r", "f"):
             ok, ack = self._record_outcome(project_id, "fechou" if kind == "f" else "respondeu")
             if not ok:
@@ -385,8 +420,8 @@ class Freelas99Source(JobSource):
             cb.answer()
             return
 
-        if cb.message.get("message_id"):
-            telegram_api.edit_reply_markup(cb.message["message_id"], telegram_api.static_label_keyboard(label))
+        if message_id:
+            telegram_api.edit_reply_markup(message_id, telegram_api.static_label_keyboard(label))
         cb.answer(ack)
 
     @staticmethod
@@ -402,7 +437,9 @@ class Freelas99Source(JobSource):
         gravado = storage.record_outcome(project_id, resultado)
         return True, "🏆 Marcado: projeto fechado" if gravado == "fechou" else "💬 Marcado: cliente respondeu"
 
-    def _enqueue_from_message(self, cb: Callback, project_id: str, no_link_msg: str) -> bool | None:
+    def _enqueue_from_message(
+        self, cb: Callback, project_id: str, no_link_msg: str, action: str = "prepare"
+    ) -> bool | None:
         """
         Enfileira em manual_queue o link que está no texto da mensagem clicada
         (callback_data só comporta o id). None = já respondeu o clique com o motivo.
@@ -412,10 +449,10 @@ class Freelas99Source(JobSource):
             cb.answer(no_link_msg)
             return None
         pending = approvals.get_pending(project_id)
-        if pending is not None and pending["decision"] is None:
+        if action == "prepare" and pending is not None and pending["decision"] is None:
             cb.answer("Esse projeto já está aguardando sua aprovação.")
             return None
-        if not manual_queue.add(project_id, views.project_url(match.group(1))):
+        if not manual_queue.add(project_id, views.project_url(match.group(1)), action=action):
             cb.answer("Esse projeto já está na fila, aguarde.")
             return None
         return True

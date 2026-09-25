@@ -105,3 +105,7 @@ PROPOSAL_SUCCESS_MARKER = ".icon-proposal"
 # enviada pra esse projeto. Checados por PRESENÇA (query_selector), nunca clicados —
 # "#btnCancelarProposta" é um link que CANCELA a proposta se clicado.
 PROPOSAL_ALREADY_SENT_MARKER = "#btnCancelarProposta, .icon-proposal"
+# O link "Cancelar proposta" em si (<a id="btnCancelarProposta" class="simple-link">),
+# fornecido pelo usuário. SÓ clicado por submitter.cancel_proposal, depois de uma
+# confirmação explícita no Telegram — em qualquer outro lugar, só checagem de presença.
+PROPOSAL_CANCEL_LINK = "#btnCancelarProposta"

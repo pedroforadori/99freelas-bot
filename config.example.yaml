@@ -126,3 +126,72 @@ github_jobs:
     # Caminho relativo à raiz do repo (ou absoluto). No Docker, deixe dentro de data/
     # (única pasta montada no container). null = sem anexo.
     anexo: "data/curriculo.pdf"
+
+# Vagas do APinfo (bot/sources/apinfo/). ENVIO AUTOMÁTICO, sem aprovação no Telegram: a
+# cada intervalo_busca_min o bot pesquisa, se candidata às vagas novas (manda CPF/senha
+# no "Envie seu currículo" pra descobrir o e-mail/assunto — APINFO_CPF/APINFO_SENHA no
+# .env) e envia o e-mail com o currículo por SMTP (SMTP_* no .env). O Telegram recebe o
+# resumo de cada rodada. Histórico em data/apinfo_jobs.json.
+# O APinfo limita consultas por IP: pisos no código (pausa >= 6s, pausa_vaga >= 25s,
+# intervalo >= 30 min) e espera dobrada a cada bloqueio seguido (até 8x).
+apinfo_jobs:
+  enabled: false
+  # "real" = e-mail pra empresa | "teste" = e-mail vai pra você (SMTP_USER), assunto
+  # "[TESTE -> destino] ..." | "sem_email" = só se candidata e registra o contato.
+  modo: "teste"
+  # De quantos em quantos minutos pesquisar (mínimo 30).
+  intervalo_busca_min: 60
+  # true = tenta de novo vagas que falharam antes (status "falhou").
+  retentar_falhas: false
+  busca:
+    # Cada termo vira uma pesquisa separada no site.
+    palavras_chave: ["php", "laravel", "react"]
+    # 1 = pesquisar só no título da vaga | 2 = título / descrição / cidade
+    onde: 1
+    # 1 = todas as palavras devem estar presentes | 2 = alguma das palavras
+    andor: 1
+    # Datas opcionais no formato dd/mm/aa ("" = ignora)
+    data_de: ""
+    data_ate: ""
+    # Filtros do próprio site ([] = não filtra). Estados: "SP", "RJ", "HO" (Home Office);
+    # cidades: códigos do site (1000 = São Paulo, 601 = Home Office); cargos: códigos do
+    # site (27 = Programador / Desenvolvedor, 21 = Analista Programador).
+    estados: []
+    cidades: []
+    cargos: []
+    # Quantas páginas de resultado ler por palavra-chave
+    max_paginas: 3
+  filtro_local:
+    # Aplicados pelo bot depois da busca (sem diferenciar maiúsculas).
+    excluir_titulo: ["estágio", "estagio", "júnior", "junior"]
+    # Se preenchido, o título precisa conter pelo menos um destes termos.
+    exigir_titulo: []
+    excluir_descricao: []
+    # Se preenchido, só aceita vagas destes locais (trecho de "Cidade - UF"), ex: ["HO", "SP"]
+    locais: []
+    # Descarta vagas que pedem inglês acima de básico/técnico ou com descrição em inglês.
+    bloquear_ingles: true
+  envio:
+    # Máximo de candidaturas por busca.
+    max_por_execucao: 10
+    # Pausa entre requisições ao site e entre candidaturas, em segundos (sorteado).
+    pausa_min: 8
+    pausa_max: 20
+    pausa_vaga_min: 40
+    pausa_vaga_max: 90
+  email:
+    # Caminho relativo à raiz do repo. No Docker, precisa ficar dentro de data/.
+    anexo: "data/curriculo.pdf"
+    # Cópia oculta (CCO) pra você mesmo (SMTP_USER) em cada e-mail real.
+    copia_para_mim: false
+    # Assunto = o que o APinfo manda usar ("apinfo - 85138 - ..."). Variáveis do texto:
+    # {cargo} {codigo} {empresa} {local} {publicada} {nome} (= EMAIL_FROM_NAME).
+    texto: |
+      Olá,
+
+      Tenho interesse na vaga de {cargo} (código {codigo}) divulgada no APinfo.
+
+      Segue meu currículo em anexo. Fico à disposição para uma conversa.
+
+      Atenciosamente,
+      {nome}

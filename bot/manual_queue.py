@@ -34,13 +34,17 @@ def _save(data: list) -> None:
     os.replace(tmp_path, DATA_PATH)
 
 
-def add(project_id: str, url: str) -> bool:
-    """Enfileira o projeto. Retorna False se ele já estava na fila (link colado duas vezes)."""
+def add(project_id: str, url: str, action: str = "prepare") -> bool:
+    """
+    Enfileira o projeto. `action`: "prepare" (preparar proposta) ou "cancel" (cancelar a
+    proposta já enviada — botão "🗑️ Cancelar proposta"). Itens antigos, sem o campo, são
+    "prepare". Retorna False se o projeto já estava na fila (link colado duas vezes).
+    """
     with _LOCK:
         data = _load()
         if any(item["id"] == project_id for item in data):
             return False
-        data.append({"id": project_id, "url": url, "queued_at": datetime.utcnow().isoformat()})
+        data.append({"id": project_id, "url": url, "action": action, "queued_at": datetime.utcnow().isoformat()})
         _save(data)
         return True
 

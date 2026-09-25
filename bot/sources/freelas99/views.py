@@ -234,6 +234,7 @@ LINK_STATUS_LABELS = {
     "rejected_by_user": "rejeitada por você",
     "failed": "falhou",
     "skipped_duplicate": "ignorado pelo filtro",
+    "cancelled_by_user": "proposta cancelada por você",
 }
 
 
@@ -260,8 +261,28 @@ def link_menu_keyboard(project_id: str) -> dict:
                 {"text": "💬 Respondeu", "callback_data": f"link:r:{project_id}"},
                 {"text": "🏆 Fechou", "callback_data": f"link:f:{project_id}"},
             ],
+            [{"text": "🗑️ Cancelar proposta", "callback_data": f"link:c:{project_id}"}],
         ]
     }
+
+
+def cancel_confirm_keyboard(project_id: str) -> dict:
+    """Cancelar não tem volta — o menu de link pede uma segunda confirmação."""
+    return {
+        "inline_keyboard": [
+            [{"text": "🗑️ Sim, cancelar a proposta", "callback_data": f"link:x:{project_id}"}],
+            [{"text": "↩️ Voltar", "callback_data": f"link:m:{project_id}"}],
+        ]
+    }
+
+
+def notify_cancel_result(url: str, title: str, success: bool, detail: str) -> None:
+    titulo = esc(title) if title else esc(url)
+    if success:
+        texto = f"{_PREFIX}🗑️ <b>Proposta cancelada</b>\n{titulo}\n{esc(url)}"
+    else:
+        texto = f"{_PREFIX}⚠️ <b>Não consegui cancelar a proposta</b>\n{titulo}\n{esc(url)}\n<b>Motivo:</b> {esc(detail)}"
+    telegram_api.send_message(texto)
 
 
 def notify_manual_project_failed(url: str, reason: str, retry: bool = True) -> None:

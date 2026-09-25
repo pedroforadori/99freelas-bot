@@ -30,6 +30,7 @@ logger_setup.get_logger = logging.getLogger
 from bot import ai_writer, approvals, connections, email_sender, manual_queue, messages  # noqa: E402
 from bot import main, notifier, storage, submitter, telegram_api, utils  # noqa: E402
 from bot.sources import registry  # noqa: E402
+from bot.sources.apinfo import client as apinfo_client  # noqa: E402
 from bot.sources.freelas99 import views as views_99  # noqa: E402
 from bot.sources.github import client as github_jobs  # noqa: E402
 from bot.sources.github import views as views_gh  # noqa: E402
@@ -135,7 +136,7 @@ class _FixedDate(date):
 @pytest.fixture(autouse=True)
 def isolated(monkeypatch, tmp_path, telegram):
     for key in list(os.environ):
-        if key.startswith(("SMTP_", "EMAIL_", "GITHUB_", "TELEGRAM_", "PORTFOLIO_")):
+        if key.startswith(("SMTP_", "EMAIL_", "GITHUB_", "TELEGRAM_", "PORTFOLIO_", "APINFO_")):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "TOKEN")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", CHAT_ID)
@@ -161,6 +162,8 @@ def _data_paths():
         (connections, "CACHE_PATH", "connections.json"),
         (messages, "CACHE_PATH", "messages_state.json"),
         (github_jobs, "DATA_PATH", "github_jobs.json"),
+        (apinfo_client, "DATA_PATH", "apinfo_jobs.json"),
+        (apinfo_client, "DEBUG_DIR", "apinfo_debug"),
         (telegram_api, "_OFFSET_PATH", "telegram_offset.json"),
     ]
 

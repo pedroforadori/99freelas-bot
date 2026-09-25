@@ -21,6 +21,12 @@
               "callback_data": "link:f:785400",
               "text": "🏆 Fechou"
             }
+          ],
+          [
+            {
+              "callback_data": "link:c:785400",
+              "text": "🗑️ Cancelar proposta"
+            }
           ]
         ]
       },

@@ -6,13 +6,14 @@ Fica fora de bot/sources/__init__.py de propósito: submitter.py/messages.py imp
 bot.sources.freelas99.views, e se o __init__ do pacote importasse as fontes, isso puxaria
 freelas99/source.py → submitter.py de volta (import circular).
 """
+from bot.sources.apinfo.source import ApinfoSource
 from bot.sources.base import JobSource
 from bot.sources.freelas99.source import Freelas99Source
 from bot.sources.github.source import GitHubSource
 
 # A primeira é a padrão: entradas antigas de data/pending_approvals.json não têm "source"
 # (anteriores ao GitHub) e são todas do 99Freelas.
-ALL_SOURCES: list[JobSource] = [Freelas99Source(), GitHubSource()]
+ALL_SOURCES: list[JobSource] = [Freelas99Source(), GitHubSource(), ApinfoSource()]
 DEFAULT_SOURCE = ALL_SOURCES[0]
 
 _BY_NAME = {s.name: s for s in ALL_SOURCES}

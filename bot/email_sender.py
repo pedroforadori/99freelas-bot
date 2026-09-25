@@ -1,6 +1,7 @@
 """
-Envio de e-mail por SMTP (candidatura a vagas do GitHub, ver bot/sources/github/) — só chamado
-por GitHubSource.deliver depois da aprovação no Telegram.
+Envio de e-mail por SMTP (candidatura a vagas). Chamado por GitHubSource.deliver depois da
+aprovação no Telegram e, sem aprovação (envio automático), pela fonte APinfo
+(bot/sources/apinfo/client.py).
 
 Config no .env: SMTP_HOST, SMTP_PORT (587 = STARTTLS, 465 = SSL), SMTP_USER,
 SMTP_PASSWORD, EMAIL_FROM (default SMTP_USER) e EMAIL_FROM_NAME (opcional). No Gmail,
@@ -38,9 +39,13 @@ def render_links(text: str) -> tuple[str, str]:
 
 
 def send(
-    to: str, subject: str, body: str, attachment_path: str | None = None, body_html: str | None = None
+    to: str, subject: str, body: str, attachment_path: str | None = None, body_html: str | None = None,
+    bcc: str | None = None,
 ) -> tuple[bool, str]:
-    """Retorna (sucesso, detalhe). Nunca levanta exceção. `body_html` vira a alternativa HTML."""
+    """
+    Retorna (sucesso, detalhe). Nunca levanta exceção. `body_html` vira a alternativa HTML;
+    `bcc` é cópia oculta (ex: apinfo_jobs.email.copia_para_mim).
+    """
     host = os.environ.get("SMTP_HOST")
     user = os.environ.get("SMTP_USER")
     password = os.environ.get("SMTP_PASSWORD")
@@ -57,6 +62,8 @@ def send(
     msg["From"] = formataddr((from_name, from_addr)) if from_name else from_addr
     msg["To"] = to
     msg["Subject"] = subject
+    if bcc:
+        msg["Bcc"] = bcc
     msg["Message-ID"] = make_msgid(domain=from_addr.split("@")[-1])
     msg.set_content(body)
     if body_html:

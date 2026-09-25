@@ -13,6 +13,8 @@ data/telegram_offset.json
 data/manual_queue.json
 data/portfolio/
 data/github_jobs.json
+data/apinfo_jobs.json
+data/apinfo_debug/
 # Currículo/anexos dos e-mails de candidatura (github_jobs.email.anexo)
 data/*.pdf
 data/*.docx
