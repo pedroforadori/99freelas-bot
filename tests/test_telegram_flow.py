@@ -236,8 +236,7 @@ def test_retry_ia_sucesso(api, telegram, snapshot):
     telegram.push_callback(f"retryia:{PID}", message_id=555)
     api.poll(CONFIG)
     proposal = approvals.get_pending(PID)["proposal"]
-    # Comportamento atual: repassa "template" (ai_writer cai pra "padrao" com um warning).
-    assert chamadas == ["template"]
+    assert chamadas == ["padrao"]  # "template" não é estilo da IA
     assert proposal["texto"] == "Texto novo da IA"
     assert proposal["texto_ia_falhou"] is False
     assert proposal["texto_variante"] == "padrao"

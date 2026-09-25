@@ -35,6 +35,17 @@ def esc(text) -> str:
     return html.escape(str(text))
 
 
+def truncate_escaped(text: str, max_chars: int, suffix: str = "… (veja mais no link)") -> str:
+    """
+    Trunca texto JÁ escapado (esc) sem partir uma entidade HTML no meio (&amp; etc.) —
+    uma entidade cortada faz o Telegram rejeitar a mensagem inteira.
+    """
+    if len(text) <= max_chars:
+        return text
+    corte = text.rfind("&", max_chars - 8, max_chars)
+    return text[: corte if corte != -1 else max_chars] + suffix
+
+
 def send_message(text: str, reply_markup: dict | None = None) -> None:
     """Mensagem simples (HTML, sem preview de link). Não devolve o message_id — ver call()."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN")

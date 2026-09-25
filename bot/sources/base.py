@@ -118,7 +118,7 @@ class JobSource(ABC):
 
         if entry["decision"] == "rejected":
             self.on_rejected(entry)
-            notifier.finalize_approval_message(message_id, approved=False, detail="rejeitada por você via Telegram")
+            notifier.finalize_approval_message(message_id, "rejected", "rejeitada por você via Telegram")
             approvals.resolve(project_id)
             return
 
@@ -127,7 +127,7 @@ class JobSource(ABC):
             return
 
         success, detail = self.deliver(entry)
-        notifier.finalize_approval_message(message_id, approved=success, detail="" if success else detail)
+        notifier.finalize_approval_message(message_id, "sent" if success else "failed", "" if success else detail)
         self.on_delivered(entry, success, detail)
         if success:
             approvals.resolve(project_id)

@@ -69,8 +69,7 @@ def test_99_aprovado_falhou(api, telegram, envios):
 
     assert approvals.get_pending(PID)["decision"] == "failed"  # guardado pro "Tentar de novo"
     assert storage.get_application(PID)["status"] == "failed"
-    # Comportamento atual: falha de envio aparece com o rótulo de "Rejeitada" + motivo.
-    assert _markups(telegram) == ["❌ Rejeitada — projeto foi fechado"]
+    assert _markups(telegram) == ["⚠️ Falha no envio — projeto foi fechado"]
 
 
 def test_99_rejeitado(api, telegram, envios):
@@ -142,6 +141,7 @@ def test_github_aprovado_falhou(api, telegram, envios):
 
     assert approvals.get_pending(GH_ID)["decision"] == "failed"
     assert api.github.get_record(GH_ID)["status"] == "failed"
+    assert _markups(telegram) == ["⚠️ Falha no envio — erro SMTP: boom"]
     resultado = telegram.last("sendMessage")
     assert resultado["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == f"retry:{GH_ID}"
 

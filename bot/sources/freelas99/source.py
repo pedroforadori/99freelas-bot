@@ -324,17 +324,19 @@ class Freelas99Source(JobSource):
             cb.answer("Sem descrição completa salva desse projeto — não é possível gerar via IA.")
             return
 
-        texto = ai_writer.generate_proposal_text(
-            entry["project"], full_description, cb.config, variante=proposal.get("texto_variante") or "padrao"
-        )
+        # "template" marca que o texto caiu pro template fixo — não é um estilo da IA
+        # (passar pra ela gerava um warning encaminhado pro Telegram); volta pro padrão.
+        variante = proposal.get("texto_variante")
+        if variante in (None, "template"):
+            variante = "padrao"
+        texto = ai_writer.generate_proposal_text(entry["project"], full_description, cb.config, variante=variante)
         if not texto:
             cb.answer("IA falhou de novo. Tente mais tarde ou aprove com o texto atual.")
             return
 
         proposal["texto"] = texto
         proposal["texto_ia_falhou"] = False
-        if proposal.get("texto_variante") in (None, "template"):
-            proposal["texto_variante"] = "padrao"
+        proposal["texto_variante"] = variante
         if not approvals.update_proposal(project_id, proposal):
             cb.answer("Já decidido ou expirado — não é possível gerar de novo.")
             return

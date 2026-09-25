@@ -131,15 +131,24 @@ def send_approval_message(text: str, keyboard: dict) -> int | None:
     return telegram_api.send_with_keyboard(text, keyboard)
 
 
-def finalize_approval_message(message_id: int | None, approved: bool, detail: str) -> None:
+_FINAL_LABELS = {
+    "sent": "✅ Aprovada e enviada",
+    "rejected": "❌ Rejeitada",
+    "failed": "⚠️ Falha no envio",
+}
+
+
+def finalize_approval_message(message_id: int | None, outcome: str, detail: str = "") -> None:
     """
     Troca o teclado da mensagem de aprovação original por um rótulo estático mostrando o
-    resultado final — nunca mexe no TEXTO da mensagem, então a descrição/proposta
-    completas continuam visíveis no histórico do chat pra referência futura.
+    resultado final (`outcome`: "sent" | "rejected" | "failed") — nunca mexe no TEXTO da
+    mensagem, então a descrição/proposta completas continuam visíveis no histórico do chat.
+    Falha de envio tem rótulo próprio (antes aparecia como "❌ Rejeitada"); o botão
+    "🔄 Tentar de novo" vem na notificação de falha da fonte.
     """
     if not message_id:
         return
-    label = "✅ Aprovada e enviada" if approved else "❌ Rejeitada"
+    label = _FINAL_LABELS[outcome]
     if detail:
         label = f"{label} — {detail}"
     telegram_api.edit_reply_markup(message_id, telegram_api.static_label_keyboard(label[:64]))

@@ -145,8 +145,8 @@ def notify_proposal_result(
 
     linhas = [
         f"{_PREFIX}{emoji} <b>{titulo}</b>",
-        f"<b>Projeto:</b> {project.get('title', '')}",
-        f"<b>Link:</b> {project.get('url', '')}",
+        f"<b>Projeto:</b> {esc(project.get('title', ''))}",
+        f"<b>Link:</b> {esc(project.get('url', ''))}",
     ]
     if proposal:
         linhas.append(f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}")
@@ -163,7 +163,7 @@ def notify_proposal_result(
     if linha_conexoes:
         linhas.append(linha_conexoes)
 
-    linhas.append(f"<b>Detalhe:</b> {detail}")
+    linhas.append(f"<b>Detalhe:</b> {esc(detail)}")
 
     # Falha real ganha botão de retry (ver telegram_dispatcher). Nunca em simulação.
     reply_markup = None
@@ -176,8 +176,8 @@ def notify_proposal_result(
 def approval_text(project: dict, proposal: dict) -> str:
     cabecalho = (
         f"{_PREFIX}🆕 <b>Nova proposta pra aprovar</b>\n"
-        f"<b>Projeto:</b> {project.get('title', '')}\n"
-        f"<b>Link:</b> {project.get('url', '')}\n"
+        f"<b>Projeto:</b> {esc(project.get('title', ''))}\n"
+        f"<b>Link:</b> {esc(project.get('url', ''))}\n"
     )
     valores = f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}\n<b>Prazo:</b> {proposal['prazo_dias']} dias\n"
     origem_line = _origem_line(proposal)
@@ -196,16 +196,17 @@ def approval_text(project: dict, proposal: dict) -> str:
             "⚠️ <b>A IA falhou ao gerar o texto</b> — abaixo está o template fixo de "
             "config.yaml. Use o botão 🔄 pra tentar gerar via IA de novo, ou aprove assim mesmo.\n"
         )
-    texto_proposta = proposal["texto"]
-    descricao = proposal.get("full_description") or project.get("description") or ""
+    # Tudo que vem do site/da IA é escapado — um "<" solto faz o Telegram rejeitar a
+    # mensagem inteira e o pedido de aprovação se perde.
+    texto_proposta = esc(proposal["texto"])
+    descricao = esc(proposal.get("full_description") or project.get("description") or "")
 
     # Orçamento generoso pro texto da proposta (é o que importa pra decidir) — a descrição
     # é truncada se precisar, nunca o texto da proposta em si.
     moldura = "\n<b>Descrição do projeto:</b>\n\n\n<b>Proposta:</b>\n"
     overhead = len(cabecalho) + len(valores) + len(moldura) + len(texto_proposta) + 50
     max_desc_chars = max(telegram_api.MSG_LIMIT - overhead, 200)
-    if len(descricao) > max_desc_chars:
-        descricao = descricao[:max_desc_chars] + "… (veja mais no link)"
+    descricao = telegram_api.truncate_escaped(descricao, max_desc_chars)
 
     return f"{cabecalho}{valores}\n<b>Descrição do projeto:</b>\n{descricao}\n\n<b>Proposta:</b>\n{texto_proposta}"
 

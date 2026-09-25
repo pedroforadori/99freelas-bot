@@ -146,6 +146,24 @@ def test_notify_github(api, telegram, snapshot):
     snapshot("notify_github", _sent(telegram))
 
 
+def test_render_99_escapa_conteudo_externo(api):
+    """Título/descrição/texto com "<" ou "&" não podem quebrar o parse_mode HTML do Telegram."""
+    project = project_99(title="App <React> & Node")
+    proposal = proposal_99(texto="Uso <b> & afins", full_description="a < b & c > d")
+    text, _ = api.render_approval(project, proposal)
+    assert "App &lt;React&gt; &amp; Node" in text
+    assert "Uso &lt;b&gt; &amp; afins" in text
+    assert "a &lt; b &amp; c &gt; d" in text
+
+
+def test_render_99_trunca_sem_partir_entidade(api):
+    for n in range(4000, 4012):  # varia o ponto de corte em volta das entidades
+        text, _ = api.render_approval(project_99(), proposal_99(full_description="&" * n))
+        corpo = text.split("<b>Descrição do projeto:</b>\n")[1].split("… (veja mais no link)")[0]
+        assert corpo == "&amp;" * (len(corpo) // 5), n
+        assert len(text) <= 4096
+
+
 def test_render_escolhe_por_origem(api):
     """Projeto sem "source" (formato antigo de pending_approvals.json) = 99Freelas."""
     text_99, kb_99 = api.render_approval(project_99(), proposal_99())

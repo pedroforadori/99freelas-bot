@@ -47,10 +47,7 @@ def approval_text(job: dict, email: dict) -> str:
     moldura = "\n<b>Descrição da vaga:</b>\n\n\n<b>E-mail:</b>\n"
     overhead = len(cabecalho) + len(info) + len(moldura) + len(texto_email) + 50
     max_desc_chars = max(telegram_api.MSG_LIMIT - overhead, 200)
-    if len(descricao) > max_desc_chars:
-        # Corta num ponto que não quebre uma entidade HTML escapada (&amp; etc.).
-        corte = descricao.rfind("&", max_desc_chars - 8, max_desc_chars)
-        descricao = descricao[: corte if corte != -1 else max_desc_chars] + "… (veja mais no link)"
+    descricao = telegram_api.truncate_escaped(descricao, max_desc_chars)
 
     return f"{cabecalho}{info}\n<b>Descrição da vaga:</b>\n{descricao}\n\n<b>E-mail:</b>\n{texto_email}"
 
