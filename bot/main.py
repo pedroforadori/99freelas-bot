@@ -11,7 +11,9 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # permite `python bot/main.py`
 
-from bot import approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter
+from bot import (
+    approvals, connections, email_sender, github_jobs, manual_queue, messages, notifier, scraper, storage, submitter,
+)
 from bot import site_selectors as sel
 from bot.filter import is_match
 from bot.logger_setup import get_logger
@@ -94,7 +96,7 @@ def _recheck_awaiting_average(page, config: dict) -> None:
             continue
         if proposal is None:
             log.info("Desistindo de '%s' enquanto aguardava a média — %s", project["title"], reason)
-            notifier.notify_activity(f"🚫 Parou de aguardar: {notifier.esc(project['title'])}\n{notifier.esc(reason)}")
+            notifier.notify_activity(f"🚫 Parou de aguardar: {notifier.esc(project['title'])}\n{notifier.esc(reason)}", source=notifier.SOURCE_99)
             register_application(project_id, project["title"], status="failed", detail=reason)
             continue
 
@@ -127,14 +129,14 @@ def run_cycle(page, config: dict) -> None:
     new_projects = [p for p in projects if not already_applied(p["id"])]
     log.info("%d projetos novos (de %d na página) ainda não avaliados.", len(new_projects), len(projects))
     if new_projects:
-        notifier.notify_activity(f"🔎 Ciclo: {len(new_projects)} projeto(s) novo(s) de {len(projects)} na página")
+        notifier.notify_activity(f"🔎 Ciclo: {len(new_projects)} projeto(s) novo(s) de {len(projects)} na página", source=notifier.SOURCE_99)
 
     queued_count = 0
     for project in new_projects:
         match, reason = is_match(project, config)
         if not match:
             log.info("Ignorado: '%s' — %s", project["title"], reason)
-            notifier.notify_activity(f"🚫 Ignorado: {notifier.esc(project['title'])}\n{notifier.esc(reason)}")
+            notifier.notify_activity(f"🚫 Ignorado: {notifier.esc(project['title'])}\n{notifier.esc(reason)}", source=notifier.SOURCE_99)
             register_application(project["id"], project["title"], status="skipped_duplicate", detail=reason)
             continue
 
@@ -151,7 +153,7 @@ def run_cycle(page, config: dict) -> None:
             # Ainda sem média de concorrentes — espera juntar propostas antes de montar
             # (preço competitivo). _recheck_awaiting_average checa de novo a cada ciclo.
             log.info("Aguardando média de propostas: '%s'", project["title"])
-            notifier.notify_activity(f"⏳ Aguardando média de propostas: {notifier.esc(project['title'])}")
+            notifier.notify_activity(f"⏳ Aguardando média de propostas: {notifier.esc(project['title'])}", source=notifier.SOURCE_99)
             register_application(
                 project["id"], project["title"], status="awaiting_average", detail=reason,
                 extra={"project": project, "aguardando_desde": datetime.utcnow().isoformat()},
@@ -236,9 +238,13 @@ def process_pending_approvals(page, config: dict) -> None:
         proposal = entry["proposal"]
         message_id = entry.get("telegram_message_id")
 
+        if project.get("source") == notifier.SOURCE_GITHUB:
+            _resolve_github_approval(entry)
+            continue
+
         if entry["decision"] == "rejected":
             log.info("Rejeitada pelo usuário: '%s'", project.get("title"))
-            notifier.notify_activity(f"❌ Rejeitada por você: {notifier.esc(project.get('title'))}")
+            notifier.notify_activity(f"❌ Rejeitada por você: {notifier.esc(project.get('title'))}", source=notifier.SOURCE_99)
             register_application(
                 project_id, project["title"], status="rejected_by_user", detail="rejeitada pelo usuário via Telegram"
             )
@@ -246,7 +252,7 @@ def process_pending_approvals(page, config: dict) -> None:
             approvals.resolve(project_id)
             continue
 
-        notifier.notify_activity(f"🚀 Enviando proposta aprovada: {notifier.esc(project.get('title'))}")
+        notifier.notify_activity(f"🚀 Enviando proposta aprovada: {notifier.esc(project.get('title'))}", source=notifier.SOURCE_99)
         success, detail = submitter.finalize_submission(page, project, proposal)
         status = "sent" if success else "failed"
         log.info("%s (aprovada): '%s' — %s", "ENVIADA" if success else "FALHOU", project.get("title"), detail)
@@ -258,6 +264,72 @@ def process_pending_approvals(page, config: dict) -> None:
             # Mantém a proposta guardada pro botão "🔄 Tentar de novo" da notificação de
             # falha poder reenviá-la igual (ver approvals.mark_failed/retry_failed).
             approvals.mark_failed(project_id)
+
+
+def run_github_cycle(config: dict) -> None:
+    """
+    Vagas novas nos repos do GitHub configurados (github_jobs no config.yaml). Não usa o
+    Playwright. Com e-mail no corpo da issue → pedido de aprovação no Telegram (mesma fila
+    de approvals.py, project["source"] = "github"); sem e-mail → só avisa, uma vez.
+    """
+    if not (config.get("github_jobs") or {}).get("enabled"):
+        return
+    queued = 0
+    for job in github_jobs.check_new_issues(config):
+        if not job["email_to"]:
+            log.info("Vaga do GitHub sem e-mail: '%s'", job["title"])
+            notifier.notify_github_no_email(job)
+            github_jobs.register(job["id"], job["title"], "no_email", "sem e-mail no corpo da issue", {"url": job["url"]})
+            continue
+        if queued >= github_jobs.MAX_QUEUED_PER_CYCLE:
+            break  # não registra — fica pro próximo ciclo
+        email = github_jobs.build_email(job, config)
+        message_id = notifier.send_approval_request(job, email)
+        if message_id is None:
+            # Telegram fora/timeout: sem mensagem não há botão pra aprovar — não registra,
+            # a vaga volta a ser "nova" e é reenviada no próximo ciclo.
+            log.warning("Pedido de aprovação da vaga '%s' não chegou ao Telegram — tenta de novo no próximo ciclo.", job["title"])
+            continue
+        approvals.add_pending(job, email, message_id)
+        github_jobs.register(
+            job["id"], job["title"], "pending_approval", "aguardando aprovação no Telegram",
+            {"url": job["url"], "email_to": email["email_to"]},
+        )
+        log.info("Vaga do GitHub aguardando aprovação: '%s' → %s", job["title"], email["email_to"])
+        queued += 1
+
+
+def _resolve_github_approval(entry: dict) -> None:
+    """Decisão de uma vaga do GitHub: aprovado → envia o e-mail (SMTP); rejeitado → só registra."""
+    job, email = entry["project"], entry["proposal"]
+    job_id, message_id = entry["project_id"], entry.get("telegram_message_id")
+
+    if entry["decision"] == "rejected":
+        log.info("Vaga do GitHub rejeitada pelo usuário: '%s'", job["title"])
+        github_jobs.register(job_id, job["title"], "rejected_by_user", "rejeitada via Telegram", {"url": job["url"]})
+        notifier.finalize_approval_message(message_id, approved=False, detail="rejeitada por você via Telegram")
+        approvals.resolve(job_id)
+        return
+
+    # Proteção contra e-mail duplicado: se o processo caiu entre o envio SMTP e o
+    # approvals.resolve, o registro já diz "email_sent" — não manda de novo.
+    rec = github_jobs.get_record(job_id)
+    if rec and rec.get("status") == "email_sent":
+        approvals.resolve(job_id)
+        return
+
+    success, detail = email_sender.send(email["email_to"], email["assunto"], email["texto"], email.get("anexo"), email.get("texto_html"))
+    log.info("%s (vaga GitHub): '%s' — %s", "E-MAIL ENVIADO" if success else "FALHOU", job["title"], detail)
+    github_jobs.register(
+        job_id, job["title"], "email_sent" if success else "failed", detail,
+        {"url": job["url"], "email_to": email["email_to"]},
+    )
+    notifier.finalize_approval_message(message_id, approved=success, detail="" if success else detail)
+    notifier.notify_github_email_result(job, email, success, detail)
+    if success:
+        approvals.resolve(job_id)
+    else:
+        approvals.mark_failed(job_id)  # botão "🔄 Tentar de novo" reenvia o mesmo e-mail
 
 
 def open_authenticated_page(browser):
@@ -353,6 +425,14 @@ def main() -> None:
                         # mesmo erro persistir por horas (ex: seletor quebrou), o bot já
                         # avisou uma vez; repetir a cada poucos minutos seria spam.
                         notifier.notify_bot_status("cycle_error", str(e))
+
+                # Vagas do GitHub: mesma cadência da varredura do 99Freelas, mas try próprio
+                # — uma falha aqui (API do GitHub fora, rate limit) não conta como ciclo com
+                # erro do 99Freelas; o warning já chega no Telegram via TelegramErrorHandler.
+                try:
+                    run_github_cycle(config)
+                except Exception as e:
+                    log.exception("Erro ao checar vagas do GitHub: %s", e)
 
                 # Entre ciclos de varredura (scraping), fica de olho nas aprovações/
                 # rejeições respondidas no Telegram numa cadência bem mais curta

@@ -99,3 +99,30 @@ proposal:
   # Nota fixa opcional, anexada ao final de QUALQUER texto (IA ou template fixo), sempre
   # do jeito exato escrito aqui — nunca reformulada pela IA. null/"" = não anexa nada.
   nota_extra: null
+
+# Vagas publicadas como issues no GitHub (bot/github_jobs.py). A cada ciclo de varredura
+# o bot busca as issues abertas com TODAS as labels listadas; quando o corpo da issue tem
+# um e-mail, manda pro Telegram pra aprovação (✅ envia o e-mail, ❌ descarta). Sem e-mail,
+# só avisa com o link. Envio por SMTP — configure SMTP_* no .env.
+github_jobs:
+  enabled: false
+  repos:
+    - repo: "frontendbr/vagas"
+      labels: ["Sênior", "Remoto", "CLT"]
+  # Issues criadas há mais que isso são ignoradas (evita disparar pra vagas antigas na
+  # primeira execução). null = sem limite.
+  max_issue_age_days: 7
+  email:
+    # Assunto = título da issue. Variáveis do texto: {titulo}, {url}, {repo}.
+    # Links no formato [palavra](url) viram link clicável na palavra (e-mail em HTML).
+    texto: |
+      Olá! Vi a vaga "{titulo}" ({url}) e gostaria de me candidatar.
+
+      Segue meu currículo em anexo. Fico à disposição para conversarmos.
+
+      [Portfólio](https://seusite.com) | [GitHub](https://github.com/seu-usuario)
+
+      Obrigado!
+    # Caminho relativo à raiz do repo (ou absoluto). No Docker, deixe dentro de data/
+    # (única pasta montada no container). null = sem anexo.
+    anexo: "data/curriculo.pdf"

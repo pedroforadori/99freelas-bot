@@ -14,7 +14,7 @@ import time
 
 import requests
 
-from bot import ai_writer, approvals, connections, manual_queue, storage
+from bot import ai_writer, approvals, connections, github_jobs, manual_queue, storage
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
 from bot.proposal import ORIGEM_LABELS, TEXTO_VARIANTE_LABELS
@@ -74,14 +74,33 @@ def _telegram_call(method: str, payload: dict) -> dict | list | None:
         return None
 
 
-def notify_activity(text: str) -> None:
+# Origem da mensagem, mostrada como tag no início de toda notificação ligada a um
+# projeto/vaga — o mesmo chat recebe 99Freelas e GitHub. Mensagens sobre o bot em si
+# (online/offline, erros) não têm tag.
+SOURCE_99 = "99freelas"
+SOURCE_GITHUB = "github"
+_SOURCE_TAGS = {SOURCE_99: "<b>[99Freelas]</b>", SOURCE_GITHUB: "<b>[GitHub]</b>"}
+
+
+def _tag(source: str | None) -> str:
+    tag = _SOURCE_TAGS.get(source or "")
+    return f"{tag} " if tag else ""
+
+
+def _source_of(project: dict) -> str:
+    """Projetos do 99Freelas não têm "source" (formato anterior ao GitHub) — default 99."""
+    return project.get("source") or SOURCE_99
+
+
+def notify_activity(text: str, source: str | None = None) -> None:
     """
     Log de atividade rotineira do bot pro Telegram (diferente de notify_bot_status, que só
     cobre transições de ciclo de vida). Desliga com ACTIVITY_LOG_TELEGRAM=false no .env.
+    `source` prefixa a tag de origem ([99Freelas]/[GitHub]).
     """
     if os.environ.get("ACTIVITY_LOG_TELEGRAM", "true").strip().lower() in ("false", "0", "no", "off"):
         return
-    _send_telegram(text)
+    _send_telegram(_tag(source) + text)
 
 
 class TelegramErrorHandler(logging.Handler):
@@ -182,7 +201,7 @@ def notify_new_messages(unread_count: int, previous_count: int) -> None:
     igualdade nunca chega aqui, então esta função não precisa checar isso de novo.
     """
     linhas = [
-        "📩 <b>Novas mensagens no 99Freelas</b>",
+        f"{_tag(SOURCE_99)}📩 <b>Novas mensagens no 99Freelas</b>",
         f"Não lidas: {unread_count} (antes: {previous_count})",
         f'<a href="{sel.DASHBOARD_URL}">Ver no site</a>',
     ]
@@ -295,7 +314,7 @@ def notify_proposal_result(
         emoji, titulo = ("🧪", "[SIMULAÇÃO] Falha simulada") if simulated else ("⚠️", "Falha ao enviar proposta")
 
     linhas = [
-        f"{emoji} <b>{titulo}</b>",
+        f"{_tag(SOURCE_99)}{emoji} <b>{titulo}</b>",
         f"<b>Projeto:</b> {project.get('title', '')}",
         f"<b>Link:</b> {project.get('url', '')}",
     ]
@@ -341,7 +360,7 @@ def notify_proposal_result(
 
 def _approval_text(project: dict, proposal: dict) -> str:
     cabecalho = (
-        f"🆕 <b>Nova proposta pra aprovar</b>\n"
+        f"{_tag(SOURCE_99)}🆕 <b>Nova proposta pra aprovar</b>\n"
         f"<b>Projeto:</b> {project.get('title', '')}\n"
         f"<b>Link:</b> {project.get('url', '')}\n"
     )
@@ -401,28 +420,125 @@ def _approval_keyboard(project_id: str, texto_ia_falhou: bool = False) -> dict:
     return {"inline_keyboard": keyboard}
 
 
+def _github_approval_text(job: dict, email: dict) -> str:
+    """
+    Pedido de aprovação de uma candidatura por e-mail a uma vaga do GitHub (ver
+    github_jobs.py). Tudo que vem da issue é escapado — o corpo é markdown livre, pode ter
+    "<" que quebraria o parse_mode HTML.
+    """
+    cabecalho = (
+        f"{_tag(SOURCE_GITHUB)}📧 <b>Vaga pra aprovar (e-mail)</b>\n"
+        f"<b>Vaga:</b> {esc(job.get('title', ''))}\n"
+        f"<b>Link:</b> {esc(job.get('url', ''))}\n"
+        + (f"<b>Publicada em:</b> {publicada}\n" if (publicada := github_jobs.published_label(job.get("created_at"))) else "")
+        + f"<b>Repo:</b> {esc(job.get('repo', ''))}"
+        + (f" · {esc(', '.join(job['labels']))}" if job.get("labels") else "")
+        + "\n\n"
+    )
+    info = f"<b>Para:</b> {esc(email['email_to'])}"
+    if email.get("email_editado"):
+        info += " · editado por você"
+    info += "\n"
+    if not email.get("email_da_secao_candidatura") and not email.get("email_editado"):
+        info += (
+            "⚠️ Esse e-mail não está na seção \"Como se candidatar\" — pode ser só contato de "
+            "feedback. Confira no link antes de aprovar.\n"
+        )
+    anterior = github_jobs.last_email_sent_to(email["email_to"])
+    if anterior:
+        info += f"⚠️ Você já mandou e-mail pra esse endereço ({esc(anterior['title'])}, {anterior['timestamp'][:10]}).\n"
+    info += f"<b>Assunto:</b> {esc(email['assunto'])}\n"
+    anexo = email.get("anexo")
+    if anexo:
+        existe = os.path.isfile(anexo)
+        info += f"<b>Anexo:</b> {esc(os.path.basename(anexo))}" + ("" if existe else " ⚠️ <b>arquivo não encontrado</b>") + "\n"
+    else:
+        info += "<b>Anexo:</b> nenhum (github_jobs.email.anexo vazio)\n"
+
+    texto_email = esc(email["texto"])
+    descricao = esc(job.get("description") or "")
+    moldura = "\n<b>Descrição da vaga:</b>\n\n\n<b>E-mail:</b>\n"
+    overhead = len(cabecalho) + len(info) + len(moldura) + len(texto_email) + 50
+    max_desc_chars = max(_TELEGRAM_MSG_LIMIT - overhead, 200)
+    if len(descricao) > max_desc_chars:
+        # Corta num ponto que não quebre uma entidade HTML escapada (&amp; etc.).
+        corte = descricao.rfind("&", max_desc_chars - 8, max_desc_chars)
+        descricao = descricao[: corte if corte != -1 else max_desc_chars] + "… (veja mais no link)"
+
+    return f"{cabecalho}{info}\n<b>Descrição da vaga:</b>\n{descricao}\n\n<b>E-mail:</b>\n{texto_email}"
+
+
+def _github_approval_keyboard(job_id: str) -> dict:
+    return {
+        "inline_keyboard": [
+            [{"text": "✏️ Editar destinatário", "callback_data": f"editf:e:{job_id}"}],
+            [
+                {"text": "✅ Aprovar e enviar", "callback_data": f"approve:{job_id}"},
+                {"text": "❌ Rejeitar", "callback_data": f"reject:{job_id}"},
+            ],
+        ]
+    }
+
+
+def _render_approval(project: dict, proposal: dict) -> tuple[str, dict]:
+    """(texto, teclado) da mensagem de aprovação, conforme a origem (99Freelas ou GitHub)."""
+    if _source_of(project) == SOURCE_GITHUB:
+        return _github_approval_text(project, proposal), _github_approval_keyboard(project["id"])
+    return _approval_text(project, proposal), _approval_keyboard(project["id"], proposal.get("texto_ia_falhou", False))
+
+
 def send_approval_request(project: dict, proposal: dict) -> int | None:
     """
     Manda a proposta completa (descrição do projeto + texto gerado + valor + prazo) pro
     Telegram com botões de editar oferta/prazo e "Aprovar"/"Rejeitar". Retorna o
     message_id (reaproveitado tanto por edições — editMessageText, ver
     _handle_edit_reply — quanto pelo resultado final via finalize_approval_message), ou
-    None se o envio falhar.
+    None se o envio falhar. Vagas do GitHub (project["source"] == "github") usam o mesmo
+    caminho, com texto/teclado próprios (_render_approval): `proposal` é o e-mail montado
+    por github_jobs.build_email.
     """
-    project_id = project["id"]
+    text, keyboard = _render_approval(project, proposal)
     result = _telegram_call(
         "sendMessage",
         {
             "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
-            "text": _approval_text(project, proposal),
+            "text": text,
             "parse_mode": "HTML",
             "disable_web_page_preview": True,
-            "reply_markup": _approval_keyboard(project_id, proposal.get("texto_ia_falhou", False)),
+            "reply_markup": keyboard,
         },
     )
     if not isinstance(result, dict):
         return None
     return result.get("message_id")
+
+
+def notify_github_no_email(job: dict) -> None:
+    """Vaga nova sem e-mail no corpo da issue — só avisa (candidatura pelo link), sem botões."""
+    publicada = github_jobs.published_label(job.get("created_at"))
+    _send_telegram(
+        f"{_tag(SOURCE_GITHUB)}🔗 <b>Vaga nova sem e-mail</b> — candidatura pelo link\n"
+        f"<b>Vaga:</b> {esc(job.get('title', ''))}\n"
+        f"<b>Link:</b> {esc(job.get('url', ''))}"
+        + (f"\n<b>Publicada em:</b> {publicada}" if publicada else "")
+    )
+
+
+def notify_github_email_result(job: dict, email: dict, success: bool, detail: str) -> None:
+    """Resultado do envio de um e-mail aprovado. Falha ganha "🔄 Tentar de novo" (ver _handle_retry_failed)."""
+    titulo = "✅ E-mail enviado" if success else "⚠️ Falha ao enviar e-mail"
+    linhas = [
+        f"{_tag(SOURCE_GITHUB)}{titulo}",
+        f"<b>Vaga:</b> {esc(job.get('title', ''))}",
+        f"<b>Link:</b> {esc(job.get('url', ''))}",
+        *([f"<b>Publicada em:</b> {p}"] if (p := github_jobs.published_label(job.get("created_at"))) else []),
+        f"<b>Para:</b> {esc(email.get('email_to', ''))}",
+        f"<b>Detalhe:</b> {esc(detail)}",
+    ]
+    reply_markup = None
+    if not success:
+        reply_markup = {"inline_keyboard": [[{"text": "🔄 Tentar de novo", "callback_data": f"retry:{job['id']}"}]]}
+    _send_telegram("\n".join(linhas), reply_markup)
 
 
 def finalize_approval_message(message_id: int | None, approved: bool, detail: str) -> None:
@@ -471,7 +587,10 @@ def _answer_callback(callback_id: str, text: str = "") -> None:
 _EDIT_PROMPTS = {
     "o": "Digite a nova oferta em R$ (ex: 150 ou 150,00):",
     "p": "Digite o novo prazo em dias (ex: 5):",
+    "e": "Digite o e-mail de destino (ex: vagas@empresa.com):",
 }
+
+_EMAIL_REPLY_REGEX = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 
 def _handle_edit_request(callback_id: str, field: str, project_id: str) -> None:
@@ -493,12 +612,12 @@ def _handle_edit_request(callback_id: str, field: str, project_id: str) -> None:
         _answer_callback(callback_id)
         return
 
-    titulo = entry["project"].get("title", "")
+    titulo = esc(entry["project"].get("title", ""))
     result = _telegram_call(
         "sendMessage",
         {
             "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
-            "text": f"{prompt}\n<i>{titulo}</i>",
+            "text": f"{_tag(_source_of(entry['project']))}{prompt}\n<i>{titulo}</i>",
             "parse_mode": "HTML",
             "reply_markup": {"force_reply": True, "selective": True},
         },
@@ -564,10 +683,19 @@ def _handle_edit_reply(message: dict) -> None:
             return
         proposal["prazo_dias"] = novo
         ack = f"Prazo atualizado: {novo} dias"
+    elif field == "e":
+        novo = raw_text.strip()
+        if not _EMAIL_REPLY_REGEX.match(novo):
+            _send_telegram("Não entendi o e-mail. Responda de novo à mensagem anterior com o endereço de destino.")
+            return
+        proposal["email_to"] = novo
+        proposal["email_editado"] = True
+        ack = f"Destinatário atualizado: {esc(novo)}"
     else:
         return
 
-    proposal["ajustado_manualmente"] = True
+    if field in ("o", "p"):
+        proposal["ajustado_manualmente"] = True
     if not approvals.update_proposal(project_id, proposal):
         _send_telegram("Essa proposta já foi decidida (ou não existe mais) — edição ignorada.")
         return
@@ -575,18 +703,19 @@ def _handle_edit_reply(message: dict) -> None:
 
     message_id = entry.get("telegram_message_id")
     if message_id:
+        text, keyboard = _render_approval(entry["project"], proposal)
         _telegram_call(
             "editMessageText",
             {
                 "chat_id": os.environ.get("TELEGRAM_CHAT_ID"),
                 "message_id": message_id,
-                "text": _approval_text(entry["project"], proposal),
+                "text": text,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
-                "reply_markup": _approval_keyboard(project_id, proposal.get("texto_ia_falhou", False)),
+                "reply_markup": keyboard,
             },
         )
-    _send_telegram(ack)
+    _send_telegram(_tag(_source_of(entry["project"])) + ack)
 
 
 def _handle_retry_ia_text(callback_id: str, project_id: str, config: dict) -> None:
@@ -671,7 +800,7 @@ def _handle_project_link(message: dict) -> None:
     for project_id, slug in matches.items():
         url = f"https://www.99freelas.com.br/project/{slug.lower()}"
         rec = storage.get_application(project_id)
-        linhas = [f"🔗 <b>{esc(rec['title']) if rec and rec.get('title') else 'Projeto ' + project_id}</b>", url]
+        linhas = [f"{_tag(SOURCE_99)}🔗 <b>{esc(rec['title']) if rec and rec.get('title') else 'Projeto ' + project_id}</b>", url]
         if rec:
             linhas.append(f"<b>Situação:</b> {esc(_LINK_STATUS_LABELS.get(rec.get('status'), rec.get('status', '')))}")
             if rec.get("texto_variante"):
@@ -769,7 +898,7 @@ def notify_manual_project_failed(url: str, reason: str, retry: bool = True) -> N
     if retry and match:
         reply_markup = {"inline_keyboard": [[{"text": "🔄 Tentar de novo", "callback_data": f"retry:{match.group(2)}"}]]}
     _send_telegram(
-        f"⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> {esc(url)}\n<b>Motivo:</b> {esc(reason)}",
+        f"{_tag(SOURCE_99)}⚠️ <b>Não consegui preparar a proposta</b>\n<b>Link:</b> {esc(url)}\n<b>Motivo:</b> {esc(reason)}",
         reply_markup,
     )
 
