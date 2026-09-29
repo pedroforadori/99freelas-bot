@@ -110,6 +110,35 @@ def test_entrada_antiga_sem_source_e_99(api, envios):
     assert envios["email"] == []
 
 
+def test_99_promocao_perdida_sem_media_volta_a_aguardar(api, telegram, envios):
+    """Montada promovida sem média; outro freelancer promoveu antes do envio."""
+    from bot import submitter
+    envios["result_99"] = (False, submitter.PROMOCAO_INDISPONIVEL)
+    approvals.add_pending(project_99(), proposal_99(promovida=True, promocao_sem_media=True), 555)
+    approvals.record_decision(PID, "approved")
+    api.process_approvals(CONFIG)
+
+    assert approvals.get_pending(PID) is None  # nem enviada, nem "failed" pro retry
+    rec = storage.get_application(PID)
+    assert rec["status"] == "awaiting_average"
+    assert rec["project"]["id"] == PID and rec["aguardando_desde"]
+    assert storage.proposals_sent_today() == 0
+    assert _markups(telegram) == ["⏸️ Não enviada — outro freelancer já promoveu antes"]
+    assert "Promoção perdida" in telegram.last("sendMessage")["text"]
+
+
+def test_99_urgente_so_com_promovida_em_aberto(api):
+    assert api.urgent_99() is False
+    approvals.add_pending(project_99(), proposal_99(), 555)
+    assert api.urgent_99() is False
+    approvals.add_pending(project_99(id="785401"), proposal_99(promovida=True), 556)
+    assert api.urgent_99() is True
+    approvals.record_decision("785401", "approved")
+    assert api.urgent_99() is True  # aprovada, ainda não enviada
+    approvals.mark_failed("785401")
+    assert api.urgent_99() is False
+
+
 # --- GitHub -----------------------------------------------------------------------------------
 
 

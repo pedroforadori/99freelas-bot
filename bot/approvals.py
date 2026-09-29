@@ -148,6 +148,17 @@ def get_decided_unresolved() -> list[dict]:
         ]
 
 
+def get_open() -> list[dict]:
+    """Entradas ainda em andamento: aguardando decisão (None) ou aprovadas e não enviadas."""
+    with _LOCK:
+        data = _load()
+        return [
+            {"project_id": pid, **entry}
+            for pid, entry in data.items()
+            if entry["decision"] in (None, "approved")
+        ]
+
+
 _FAILED_RETENTION_DAYS = 7
 
 

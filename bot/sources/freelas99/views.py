@@ -151,6 +151,8 @@ def notify_proposal_result(
     if proposal:
         linhas.append(f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}")
         linhas.append(f"<b>Prazo:</b> {proposal['prazo_dias']} dias")
+        if proposal.get("promovida"):
+            linhas.append("⭐ <b>Promovida</b>")
         origem_line = _origem_line(proposal)
         if origem_line:
             linhas.append(origem_line)
@@ -191,6 +193,13 @@ def approval_text(project: dict, proposal: dict) -> str:
     valores += f"{_propostas_hoje_line('pending', simulated=False)}\n"
     if _limite_diario_atingido():
         valores += "⚠️ <b>Limite diário já atingido</b> — aprovar gasta conexão extra além do ritmo do dia.\n"
+    if proposal.get("promovida"):
+        valores += "⭐ <b>Proposta promovida</b> — será enviada com destaque (só um freelancer por projeto consegue; aprove rápido).\n"
+        if proposal.get("promocao_sem_media"):
+            valores += (
+                "<i>Sem média de concorrentes ainda — valor/prazo sugeridos pela IA. Se outro "
+                "freelancer promover antes do envio, não envia e volta a aguardar a média.</i>\n"
+            )
     if proposal.get("texto_ia_falhou"):
         valores += (
             "⚠️ <b>A IA falhou ao gerar o texto</b> — abaixo está o template fixo de "
@@ -211,15 +220,20 @@ def approval_text(project: dict, proposal: dict) -> str:
     return f"{cabecalho}{valores}\n<b>Descrição do projeto:</b>\n{descricao}\n\n<b>Proposta:</b>\n{texto_proposta}"
 
 
-def approval_keyboard(project_id: str, edit_buttons: list[dict], texto_ia_falhou: bool = False) -> dict:
+def approval_keyboard(
+    project_id: str, edit_buttons: list[dict], texto_ia_falhou: bool = False, promovida: bool = False
+) -> dict:
     """
     Teclado da mensagem de aprovação: a linha de edição (JobSource.edit_buttons),
     opcionalmente "🔄 Tentar gerar via IA novamente" (só quando proposal["texto_ia_falhou"]
-    — ver proposal._build_texto) e a linha final de decisão.
+    — ver proposal._build_texto), o botão que liga/desliga a proposta promovida
+    (checkbox #highlight-bid do site, marcado no envio) e a linha final de decisão.
     """
     keyboard = [edit_buttons]
     if texto_ia_falhou:
         keyboard.append([{"text": "🔄 Tentar gerar texto via IA novamente", "callback_data": f"retryia:{project_id}"}])
+    promo_label = "⭐ Promovida: SIM (clique pra desligar)" if promovida else "☆ Enviar como promovida"
+    keyboard.append([{"text": promo_label, "callback_data": f"promo:{project_id}"}])
     keyboard.append([
         {"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"},
         {"text": "❌ Rejeitar", "callback_data": f"reject:{project_id}"},
@@ -283,6 +297,17 @@ def notify_cancel_result(url: str, title: str, success: bool, detail: str) -> No
     else:
         texto = f"{_PREFIX}⚠️ <b>Não consegui cancelar a proposta</b>\n{titulo}\n{esc(url)}\n<b>Motivo:</b> {esc(detail)}"
     telegram_api.send_message(texto)
+
+
+def notify_promocao_perdida(project: dict) -> None:
+    """Proposta promovida sem média não foi enviada: outro freelancer promoveu antes."""
+    telegram_api.send_message(
+        f"{_PREFIX}⏸️ <b>Promoção perdida — proposta não enviada</b>\n"
+        f"<b>Projeto:</b> {esc(project.get('title', ''))}\n"
+        f"<b>Link:</b> {esc(project.get('url', ''))}\n"
+        "Outro freelancer promoveu antes. Voltou a aguardar a média de propostas — "
+        "quando ela aparecer, chega um novo pedido de aprovação."
+    )
 
 
 def notify_manual_project_failed(url: str, reason: str, retry: bool = True) -> None:

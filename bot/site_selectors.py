@@ -97,6 +97,14 @@ PROPOSAL_OFERTA_INPUT = "#oferta-final"
 PROPOSAL_PRAZO_INPUT = "#duracao-estimada"
 PROPOSAL_DETALHES_TEXTAREA = "#proposta"
 PROPOSAL_SUBMIT_BUTTON = "#btnConcluirEnvioProposta"
+# Checkbox "proposta promovida" da página de envio, fornecido pelo usuário:
+# <input id="highlight-bid" type="checkbox">. Marcado/desmarcado conforme
+# proposal["promovida"] (botão ⭐ na mensagem de aprovação do Telegram). Só um freelancer
+# por projeto pode promover — segundo o usuário, depois disso o checkbox deixa de ficar
+# visível. O <label> é um chute (checkbox estilizado costuma esconder o <input>); ainda
+# não validado contra HTML real.
+PROPOSAL_HIGHLIGHT_CHECKBOX = "#highlight-bid"
+PROPOSAL_HIGHLIGHT_LABEL = "label[for='highlight-bid']"
 # Confirmado: ao enviar, o site redireciona de volta pra página do PROJETO (não fica
 # na página /project/bid/...) e mostra este ícone ao lado do nome do projeto — o mesmo
 # usado em PROPOSAL_ALREADY_SENT_MARKER.

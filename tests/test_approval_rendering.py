@@ -22,6 +22,10 @@ def _sent(telegram) -> list[dict]:
 CASOS_99 = {
     "basico": (project_99(), proposal_99()),
     "ia_falhou": (project_99(), proposal_99(texto_ia_falhou=True, texto_variante="template")),
+    "promovida_sem_media": (
+        project_99(),
+        proposal_99(promovida=True, promocao_sem_media=True, origem_valor="ia", media_concorrentes=None, media_prazo=None),
+    ),
     "sugestao_ia_com_desconto": (
         project_99(),
         proposal_99(origem_valor="ia", oferta_sugerida_ia=2400.0, oferta=1000.0, media_concorrentes=None, media_prazo=None),

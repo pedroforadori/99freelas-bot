@@ -76,6 +76,14 @@ class JobSource(ABC):
     def tick(self, config: dict) -> None:
         """Trabalho do loop interno (ritmo APPROVAL_POLL_INTERVAL_SECONDS), entre varreduras."""
 
+    def urgent(self) -> bool:
+        """
+        True enquanto houver item sensível a velocidade (ex: proposta promovida — só um
+        freelancer por projeto consegue): o loop interno de main.py passa a rodar a cada
+        URGENT_POLL_INTERVAL_SECONDS em vez de APPROVAL_POLL_INTERVAL_SECONDS.
+        """
+        return False
+
     def owns_id(self, project_id: str) -> bool:
         """Se o id é desta fonte — usado quando não há entrada em approvals pra olhar o "source"."""
         return False
@@ -127,6 +135,13 @@ class JobSource(ABC):
             return
 
         success, detail = self.deliver(entry)
+        if success is None:
+            # A fonte desistiu de enviar AGORA e devolveu o item pra fila dela (vai pedir
+            # aprovação de novo depois) — nem enviado, nem falha pra "Tentar de novo".
+            notifier.finalize_approval_message(message_id, "deferred", detail)
+            self.on_deferred(entry, detail)
+            approvals.resolve(project_id)
+            return
         notifier.finalize_approval_message(message_id, "sent" if success else "failed", "" if success else detail)
         self.on_delivered(entry, success, detail)
         if success:
@@ -139,8 +154,14 @@ class JobSource(ABC):
         return False
 
     @abstractmethod
-    def deliver(self, entry: dict) -> tuple[bool, str]:
-        """Envia de verdade a proposta aprovada. Retorna (sucesso, detalhe)."""
+    def deliver(self, entry: dict) -> tuple[bool | None, str]:
+        """
+        Envia de verdade a proposta aprovada. Retorna (sucesso, detalhe), ou (None, motivo)
+        quando a fonte decidiu não enviar agora (ver on_deferred).
+        """
+
+    def on_deferred(self, entry: dict, detail: str) -> None:
+        """deliver() devolveu None: a fonte recoloca o item na fila dela e avisa o usuário."""
 
     @abstractmethod
     def on_delivered(self, entry: dict, success: bool, detail: str) -> None:

@@ -50,9 +50,25 @@ def process_pending_approvals() -> None:
     Aprovação envia mesmo acima da cota diária — o clique do usuário é a decisão.
     Usa ALL_SOURCES (não só as ativas): um item já na fila continua resolvível mesmo que a
     fonte tenha sido desligada no config.yaml depois.
+
+    Exceção num item (ex: Page.goto com timeout por queda de rede) não segura os outros nem
+    o resto do loop interno: a decisão continua "approved" em disco e é retentada no próximo
+    tick — queda de rede costuma ser passageira, então não vira "failed" na primeira.
     """
     for entry in approvals.get_decided_unresolved():
-        registry.source_of(entry["project"]).resolve_approval(entry)
+        try:
+            registry.source_of(entry["project"]).resolve_approval(entry)
+        except Exception as e:
+            log.exception("Erro ao resolver a aprovação de %s (tenta de novo no próximo tick): %s",
+                          entry["project_id"], e)
+
+
+def _poll_interval(sources: list[JobSource], normal: int, urgent: int) -> int:
+    try:
+        return urgent if any(s.urgent() for s in sources) else normal
+    except Exception as e:
+        log.exception("Erro ao checar urgência das fontes: %s", e)
+        return normal
 
 
 class _CycleGuard:
@@ -93,6 +109,9 @@ def main() -> None:
     interval_min = int(os.environ.get("CHECK_INTERVAL_MIN_SECONDS", 180))
     interval_max = int(os.environ.get("CHECK_INTERVAL_MAX_SECONDS", 420))
     approval_poll_interval = int(os.environ.get("APPROVAL_POLL_INTERVAL_SECONDS", 20))
+    # Cadência do loop interno enquanto alguma fonte tem item com pressa (JobSource.urgent,
+    # ex: proposta promovida no 99Freelas — só o primeiro freelancer do projeto consegue).
+    urgent_poll_interval = int(os.environ.get("URGENT_POLL_INTERVAL_SECONDS", 3))
 
     sources = registry.enabled_sources(config)
     log.info("Fontes ativas: %s", ", ".join(s.name for s in sources))
@@ -130,7 +149,7 @@ def main() -> None:
                         # TelegramErrorHandler) — categoria de falha diferente da varredura,
                         # não entra no contador de ciclos com erro.
                         log.exception("Erro ao processar aprovações pendentes/tarefas de fundo: %s", e)
-                    time.sleep(approval_poll_interval)
+                    time.sleep(_poll_interval(sources, approval_poll_interval, urgent_poll_interval))
         except KeyboardInterrupt:
             log.info("Interrompido (Ctrl+C ou parada do container).")
             notifier.notify_bot_status("stopped")

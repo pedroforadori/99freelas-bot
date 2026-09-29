@@ -75,9 +75,20 @@ def _approval_extra(proposal: dict) -> dict:
     """Estratégia usada na proposta, gravada em applied_jobs.json pra comparar os estilos depois."""
     campos = (
         "oferta", "prazo_dias", "origem_valor", "texto_variante",
-        "media_concorrentes", "media_prazo", "ajustado_manualmente",
+        "media_concorrentes", "media_prazo", "ajustado_manualmente", "promovida", "promocao_perdida",
     )
     return {c: proposal[c] for c in campos if proposal.get(c) is not None}
+
+
+def _pausa_entre_preparos(proposal: dict, minimo: float, maximo: float) -> float:
+    """
+    Pausa depois de pedir aprovação, antes do próximo preparo do mesmo ciclo. Com proposta
+    promovida a pausa é curta: só um freelancer por projeto consegue promover, e enquanto o
+    ciclo não termina o clique de aprovação no Telegram não é processado.
+    """
+    if proposal.get("promovida"):
+        return random.uniform(1, 2)
+    return random.uniform(minimo, maximo)
 
 
 class Freelas99Source(JobSource):
@@ -164,7 +175,7 @@ class Freelas99Source(JobSource):
             queued_count += 1
 
             # delay curto entre preparos dentro do mesmo ciclo, pra não parecer um robô disparando em rajada
-            time.sleep(random.uniform(5, 15))
+            time.sleep(_pausa_entre_preparos(proposal, 5, 15))
 
     def _queue(self, project: dict, proposal: dict, detail: str) -> None:
         self.queue_for_approval(project, proposal)
@@ -208,7 +219,7 @@ class Freelas99Source(JobSource):
                 continue
 
             self._queue(project, proposal, detail="aguardando aprovação no Telegram")
-            time.sleep(random.uniform(3, 8))
+            time.sleep(_pausa_entre_preparos(proposal, 3, 8))
 
     def tick(self, config: dict) -> None:
         self.process_manual_projects(config)
@@ -290,14 +301,42 @@ class Freelas99Source(JobSource):
 
     def render_approval(self, project: dict, proposal: dict) -> tuple[str, dict]:
         keyboard = views.approval_keyboard(
-            project["id"], self.edit_buttons(project["id"]), proposal.get("texto_ia_falhou", False)
+            project["id"],
+            self.edit_buttons(project["id"]),
+            proposal.get("texto_ia_falhou", False),
+            proposal.get("promovida", False),
         )
         return views.approval_text(project, proposal), keyboard
 
     def deliver(self, entry: dict) -> tuple[bool, str]:
         project = entry["project"]
         self.notify(f"🚀 Enviando proposta aprovada: {esc(project.get('title'))}")
-        return submitter.finalize_submission(self.page, project, entry["proposal"])
+        success, detail = submitter.finalize_submission(self.page, project, entry["proposal"])
+        if not success and detail == submitter.PROMOCAO_INDISPONIVEL:
+            return None, detail  # → on_deferred: volta a aguardar a média
+        return success, detail
+
+    def on_deferred(self, entry: dict, detail: str) -> None:
+        """
+        Proposta montada pra ser promovida sem média de concorrentes, mas outro freelancer
+        promoveu antes do envio (só um por projeto pode). Sem a promoção, o normal é esperar
+        a média: o projeto volta pra "awaiting_average" e, quando a média aparecer,
+        _recheck_awaiting_average monta uma proposta nova e pede aprovação de novo.
+        """
+        project = entry["project"]
+        log.info("Promoção perdida, voltando a aguardar a média: '%s'", project.get("title"))
+        register_application(
+            entry["project_id"], project["title"], status="awaiting_average", detail=detail,
+            extra={"project": project, "aguardando_desde": datetime.utcnow().isoformat()},
+        )
+        views.notify_promocao_perdida(project)
+
+    def urgent(self) -> bool:
+        """Proposta promovida aguardando decisão/envio: só a primeira do projeto consegue."""
+        return any(
+            e["proposal"].get("promovida") and e["project"].get("source", self.name) == self.name
+            for e in approvals.get_open()
+        )
 
     def on_delivered(self, entry: dict, success: bool, detail: str) -> None:
         project = entry["project"]
@@ -321,7 +360,31 @@ class Freelas99Source(JobSource):
         return {
             "retryia": CallbackRoute(arity=1, handler=self._on_retry_ia_text),
             "link": CallbackRoute(arity=2, handler=self._on_link_action),
+            "promo": CallbackRoute(arity=1, handler=self._on_toggle_promovida),
         }
+
+    def _on_toggle_promovida(self, cb: Callback) -> None:
+        """
+        "☆ Enviar como promovida" / "⭐ Promovida: SIM": liga/desliga proposal["promovida"]
+        na proposta pendente e redesenha a mensagem de aprovação. O checkbox
+        #highlight-bid do site só é marcado no envio (submitter.finalize_submission).
+        """
+        (project_id,) = cb.args
+        entry = approvals.get_pending(project_id)
+        if entry is None or entry["decision"] is not None:
+            cb.answer("Já decidido ou expirado — não é possível alterar.")
+            return
+
+        proposal = dict(entry["proposal"])
+        proposal["promovida"] = not proposal.get("promovida", False)
+        if not approvals.update_proposal(project_id, proposal):
+            cb.answer("Já decidido ou expirado — não é possível alterar.")
+            return
+
+        message_id = entry.get("telegram_message_id")
+        if message_id:
+            telegram_api.edit_text(message_id, *self.render_approval(entry["project"], proposal))
+        cb.answer("⭐ Será enviada como promovida" if proposal["promovida"] else "Promoção desligada")
 
     def _on_retry_ia_text(self, cb: Callback) -> None:
         """

@@ -135,6 +135,7 @@ _FINAL_LABELS = {
     "sent": "✅ Aprovada e enviada",
     "rejected": "❌ Rejeitada",
     "failed": "⚠️ Falha no envio",
+    "deferred": "⏸️ Não enviada",
 }
 
 

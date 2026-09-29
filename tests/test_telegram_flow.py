@@ -270,6 +270,31 @@ def test_retry_ia_sem_descricao(api, telegram):
     assert "Sem descrição completa" in telegram.last("answerCallbackQuery")["text"]
 
 
+# --- Proposta promovida -------------------------------------------------------------------
+
+
+def test_promovida_liga_e_desliga(api, telegram, snapshot, pending_99):
+    telegram.push_callback(f"promo:{PID}", message_id=555)
+    api.poll(CONFIG)
+    assert approvals.get_pending(PID)["proposal"]["promovida"] is True
+    snapshot("flow_promovida_liga", _calls(telegram))
+
+    telegram.clear()
+    telegram.push_callback(f"promo:{PID}", message_id=555)
+    api.poll(CONFIG)
+    assert approvals.get_pending(PID)["proposal"]["promovida"] is False
+    assert telegram.last("answerCallbackQuery")["text"] == "Promoção desligada"
+
+
+def test_promovida_depois_da_decisao(api, telegram, pending_99):
+    approvals.record_decision(PID, "approved")
+    telegram.push_callback(f"promo:{PID}")
+    api.poll(CONFIG)
+    assert "promovida" not in approvals.get_pending(PID)["proposal"]
+    assert telegram.last("answerCallbackQuery")["text"].startswith("Já decidido")
+    assert not telegram.of("editMessageText")
+
+
 # --- Link colado no chat ------------------------------------------------------------------
 
 

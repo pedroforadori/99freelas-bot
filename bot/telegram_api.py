@@ -15,10 +15,18 @@ import json
 import os
 
 import requests
+import urllib3.util.connection
 
 from bot.logger_setup import get_logger
 
 log = get_logger(__name__)
+
+# Força IPv4 em todo HTTP via requests/urllib3 do processo (Telegram, GitHub, APinfo). Na
+# rede do usuário o IPv6 está quebrado (confirmado 2026-09-25): api.telegram.org resolve
+# primeiro pro IPv6, a conexão espera o timeout inteiro (15s) antes de cair pro IPv4 —
+# cada chamada levava ~17s e, com o IPv4 oscilando, falhava com ConnectTimeoutError.
+# Não afeta o Playwright (Chromium tem a própria pilha de rede) nem o SMTP.
+urllib3.util.connection.HAS_IPV6 = False
 
 TELEGRAM_API_URL = "https://api.telegram.org/bot{token}/{method}"
 MSG_LIMIT = 4096

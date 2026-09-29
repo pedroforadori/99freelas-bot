@@ -1,6 +1,6 @@
 import re
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as PlaywrightTimeoutError
 
 from bot.sources.freelas99 import views
 from bot import site_selectors as sel
@@ -17,6 +17,12 @@ _AVG_DURATION_PATTERN = re.compile(r"Duração média estimada:?\s*(\d+)", re.IG
 # tem a média de propostas concorrentes — Freelas99Source.run_cycle guarda o projeto como
 # "awaiting_average" e checa de novo a cada ciclo (ver Freelas99Source._recheck_awaiting_average).
 AGUARDANDO_MEDIA = "aguardando média de propostas concorrentes"
+
+# Motivo devolvido por finalize_submission (SEM notificar resultado) quando a proposta foi
+# montada pra ser promovida sem média de concorrentes (proposal["promocao_sem_media"]) e,
+# na hora do envio, o checkbox de promoção não está mais disponível — só um freelancer por
+# projeto pode promover. Freelas99Source.on_deferred devolve o projeto pra espera da média.
+PROMOCAO_INDISPONIVEL = "outro freelancer já promoveu antes"
 
 
 def _finish(
@@ -185,7 +191,10 @@ def prepare_proposal(
         return None, "botão 'Enviar proposta' não encontrado (projeto pode ter fechado)"
 
     lowest_bid = _read_lowest_bid(page)
-    if require_average and lowest_bid is None:
+    # Só um freelancer por projeto pode promover — quando a vaga está livre, vale mais
+    # propor já (promovida, com o valor sugerido pela IA) do que esperar a média.
+    promocao = _promocao_disponivel(page)
+    if require_average and lowest_bid is None and not promocao:
         return None, AGUARDANDO_MEDIA
     media_prazo = _read_average_duration(page)
     proposal = build_proposal(
@@ -197,8 +206,57 @@ def prepare_proposal(
     # Guardado dentro do próprio proposal pra a mensagem de aprovação poder mostrar
     # a descrição completa na mensagem de aprovação, sem precisar de mais um parâmetro.
     proposal["full_description"] = full_description
+    proposal["promovida"] = promocao
+    if promocao and require_average and lowest_bid is None:
+        # Só não esperou a média por causa da promoção: se ela for perdida até o envio,
+        # finalize_submission devolve PROMOCAO_INDISPONIVEL em vez de enviar.
+        proposal["promocao_sem_media"] = True
 
     return proposal, "ok"
+
+
+def _promocao_disponivel(page: Page) -> bool:
+    """
+    Se dá pra promover a proposta nesse projeto (página de envio). Só um freelancer por
+    projeto pode promover: quando alguém já promoveu, o checkbox some/fica escondido.
+    Aceita o checkbox visível OU o <label for="highlight-bid"> visível (checkbox estilizado
+    costuma esconder o <input>). Ainda não validado ao vivo.
+    """
+    el = page.query_selector(sel.PROPOSAL_HIGHLIGHT_CHECKBOX)
+    if el is None:
+        return False
+    try:
+        if el.is_disabled():
+            return False
+        if el.is_visible():
+            return True
+        label = page.query_selector(sel.PROPOSAL_HIGHLIGHT_LABEL)
+        return bool(label and label.is_visible())
+    except PlaywrightError:
+        return False
+
+
+def _set_highlight(page: Page, promovida: bool) -> bool:
+    """
+    Deixa o checkbox de proposta promovida no estado pedido. True se ficou certo.
+    Marcar só é tentado se a promoção ainda estiver disponível (_promocao_disponivel).
+    """
+    if page.query_selector(sel.PROPOSAL_HIGHLIGHT_CHECKBOX) is None:
+        return not promovida
+    if promovida and not _promocao_disponivel(page):
+        return False
+    try:
+        page.set_checked(sel.PROPOSAL_HIGHLIGHT_CHECKBOX, promovida, timeout=3000)
+    except PlaywrightError:
+        # Checkbox estilizado costuma ficar escondido atrás de um <label> — força o clique.
+        try:
+            page.set_checked(sel.PROPOSAL_HIGHLIGHT_CHECKBOX, promovida, force=True, timeout=3000)
+        except PlaywrightError:
+            pass
+    try:
+        return page.is_checked(sel.PROPOSAL_HIGHLIGHT_CHECKBOX) == promovida
+    except PlaywrightError:
+        return False
 
 
 def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool = False) -> tuple[bool, str]:
@@ -250,6 +308,25 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         page.fill(sel.PROPOSAL_OFERTA_INPUT, format_currency_br(proposal["oferta"]))
         page.fill(sel.PROPOSAL_PRAZO_INPUT, str(proposal["prazo_dias"]))
         page.fill(sel.PROPOSAL_DETALHES_TEXTAREA, proposal["texto"])
+        aviso_promocao = ""
+        if proposal.get("promovida"):
+            if not _set_highlight(page, True):
+                if proposal.get("promocao_sem_media"):
+                    # Sem a promoção não há motivo pra enviar sem a média — quem chama
+                    # (Freelas99Source.deliver) devolve o projeto pra espera. Sem _finish:
+                    # não é falha de envio.
+                    return False, PROMOCAO_INDISPONIVEL
+                # Promoção perdida (outro freelancer promoveu antes): envia normal. Muda o
+                # proposal recebido (entry["proposal"]) pra o registro refletir o envio real.
+                _set_highlight(page, False)
+                proposal["promovida"] = False
+                proposal["promocao_perdida"] = True
+                aviso_promocao = " — sem destaque: outro freelancer já promoveu"
+        elif not _set_highlight(page, False):
+            # Nunca promover (e gastar mais) sem o usuário ter escolhido.
+            return _finish(
+                project, proposal, False, "não consegui desmarcar a opção de proposta promovida", simulated=dry_run
+            )
 
         if dry_run:
             log.info("[DRY RUN] Campos preenchidos, envio NÃO confirmado (simulação): '%s'", project["title"])
@@ -260,7 +337,7 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         with page.expect_navigation(wait_until="networkidle", timeout=8000):
             page.click(sel.PROPOSAL_SUBMIT_BUTTON)
         page.wait_for_selector(sel.PROPOSAL_SUCCESS_MARKER, timeout=8000)
-        return _finish(project, proposal, True, "proposta enviada com sucesso")
+        return _finish(project, proposal, True, f"proposta enviada com sucesso{aviso_promocao}")
     except PlaywrightTimeoutError as e:
         # A navegação pós-envio pode ter completado de fato (dom/load disparados) mesmo
         # sem atingir "networkidle" a tempo (ex: script de analytics/chat mantendo

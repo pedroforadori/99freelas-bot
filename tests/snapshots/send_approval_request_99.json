@@ -16,6 +16,12 @@
         ],
         [
           {
+            "callback_data": "promo:785400",
+            "text": "☆ Enviar como promovida"
+          }
+        ],
+        [
+          {
             "callback_data": "approve:785400",
             "text": "✅ Aprovar"
           },

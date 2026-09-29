@@ -195,6 +195,7 @@ def api(monkeypatch):
         poll=lambda config: TelegramDispatcher(registry.ALL_SOURCES, config).poll(),
         process_approvals=lambda config: main.process_pending_approvals(),
         process_manual_projects=FREELAS99.process_manual_projects,
+        urgent_99=FREELAS99.urgent,
         run_cycle=FREELAS99.run_cycle,
         run_github_cycle=run_github_cycle,
         github=github_jobs,
