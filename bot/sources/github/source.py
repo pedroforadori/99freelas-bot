@@ -16,7 +16,7 @@ log = get_logger(__name__)
 _EMAIL_REGEX = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 
 
-def _parse_email(raw: str) -> str | None:
+def parse_email(raw: str) -> str | None:
     novo = raw.strip()
     return novo if _EMAIL_REGEX.match(novo) else None
 
@@ -32,7 +32,7 @@ DESTINATARIO = EditableField(
     button="✏️ Editar destinatário",
     prompt="Digite o e-mail de destino (ex: vagas@empresa.com):",
     invalid_msg="Não entendi o e-mail. Responda de novo à mensagem anterior com o endereço de destino.",
-    parse=_parse_email,
+    parse=parse_email,
     apply=_apply_email,
 )
 

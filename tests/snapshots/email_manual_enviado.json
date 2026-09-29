@@ -1,0 +1,6 @@
+{
+  "chat_id": "4242",
+  "disable_web_page_preview": true,
+  "parse_mode": "HTML",
+  "text": "<b>[E-mail]</b> ✅ E-mail enviado\n<b>Para:</b> roberta@teste.com.br\n<b>Assunto:</b> Vaga Front End Sr.\n<b>Detalhe:</b> e-mail enviado pra roberta@teste.com.br"
+}

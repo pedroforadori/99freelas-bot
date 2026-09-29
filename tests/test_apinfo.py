@@ -283,7 +283,7 @@ def test_rodada_completa_um_passo_por_tick(site, clock, sent, telegram):
 
     assert sent[0] == {
         "to": "rh@acme.com", "subject": "apinfo - 90001 - Dev React", "body": "Olá! Vaga Dev React (90001) na ACME Ltda.\nPedro",
-        "anexo": client._attachment_path("data/cv.pdf"), "html": None, "bcc": "eu@gmail.com",
+        "anexo": client.attachment_path("data/cv.pdf"), "html": None, "bcc": "eu@gmail.com",
     }
     assert sent[1]["subject"] == "apinfo - 90002 - Dev React Sênior"  # completado pelo bot
     assert client.get_record("90001")["status"] == "enviado"

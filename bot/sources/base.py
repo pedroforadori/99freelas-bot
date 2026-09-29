@@ -177,7 +177,7 @@ class JobSource(ABC):
         """Prefixos de callback_data próprios da fonte (os genéricos ficam no dispatcher)."""
         return {}
 
-    def handle_message(self, message: dict) -> bool:
+    def handle_message(self, message: dict, config: dict) -> bool:
         """Mensagem solta no chat (não é reply). True = tratou (as outras fontes não veem)."""
         return False
 

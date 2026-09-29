@@ -195,3 +195,21 @@ apinfo_jobs:
 
       Atenciosamente,
       {nome}
+
+# E-mail manual pra recrutador (ex: e-mail achado no LinkedIn): escreva no chat do bot
+#   Roberta, Vaga Front End Sr., roberta@empresa.com.br
+#   Roberta Vaga Front End Sr. roberta@empresa.com.br   (sem vírgula: nome = 1ª palavra)
+# (nome, assunto, e-mail) → o bot mostra uma prévia com "✅ Enviar"/"❌ Cancelar". Vai o
+# mesmo currículo do APinfo (apinfo_jobs.email.anexo, e copia_para_mim), mesmo com o
+# APinfo desligado. Variáveis do texto: {recrutador} {assunto} {nome} (= EMAIL_FROM_NAME).
+# Links no formato [texto](url) viram link clicável.
+email_manual:
+  texto: |
+    Olá, {recrutador}, tudo bem?
+
+    Tenho interesse na vaga "{assunto}" e envio meu currículo em anexo.
+
+    Fico à disposição para uma conversa.
+
+    Atenciosamente,
+    {nome}

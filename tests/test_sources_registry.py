@@ -9,12 +9,12 @@ from bot import approvals, main, notifier
 from bot.sources import registry
 from bot.sources.base import CallbackRoute, EditableField, JobSource
 from bot.telegram_dispatcher import TelegramDispatcher
-from tests.conftest import FREELAS99, GITHUB
+from tests.conftest import EMAIL_MANUAL, FREELAS99, GITHUB
 
 
 def test_toda_fonte_registrada_e_completa():
     nomes = [s.name for s in registry.ALL_SOURCES]
-    assert nomes == ["99freelas", "github", "apinfo"]
+    assert nomes == ["99freelas", "github", "apinfo", "email_manual"]
     for source in registry.ALL_SOURCES:
         assert source.tag.startswith("<b>[") and source.tag.endswith("]</b>")
         codes = [f.code for f in source.editable_fields]
@@ -30,6 +30,7 @@ def test_source_of():
 
 def test_source_for_id():
     assert registry.source_for_id("gh-frontendbr/vagas#1") is GITHUB
+    assert registry.source_for_id("me-1727600000000") is EMAIL_MANUAL
     assert registry.source_for_id("785400") is FREELAS99
     assert registry.source_for_id("qualquer-coisa") is FREELAS99
 

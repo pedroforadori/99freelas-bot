@@ -67,7 +67,7 @@ class TelegramDispatcher:
     def _on_message(self, message: dict) -> None:
         """Mensagem solta (não é reply): a primeira fonte que reconhecer, trata."""
         for source in self.sources:
-            if source.handle_message(message):
+            if source.handle_message(message, self.config):
                 return
 
     def _handle_callback(self, callback: dict) -> None:

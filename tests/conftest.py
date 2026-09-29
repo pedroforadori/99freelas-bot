@@ -38,6 +38,7 @@ from bot.telegram_dispatcher import TelegramDispatcher  # noqa: E402
 
 FREELAS99 = registry.source_of({"source": "99freelas"})
 GITHUB = registry.source_of({"source": "github"})
+EMAIL_MANUAL = registry.source_of({"source": "email_manual"})
 
 SNAPSHOT_DIR = os.path.join(os.path.dirname(__file__), "snapshots")
 CHAT_ID = "4242"

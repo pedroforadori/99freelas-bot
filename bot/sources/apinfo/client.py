@@ -381,7 +381,7 @@ def apply(api: Apinfo, vaga: Vaga, cpf: str, senha: str) -> tuple[str, str]:
 # --- E-mail ----------------------------------------------------------------------------------
 
 
-def _attachment_path(anexo: str | None) -> str | None:
+def attachment_path(anexo: str | None) -> str | None:
     if not anexo:
         return None
     return anexo if os.path.isabs(anexo) else os.path.join(BASE_DIR, anexo)
@@ -412,7 +412,7 @@ def send_email(to: str, subject: str, vaga: Vaga, email_cfg: dict, modo: str) ->
         to, subject = user, f"[TESTE -> {to}] {subject}"
     elif email_cfg.get("copia_para_mim"):
         bcc = user
-    return email_sender.send(to, subject, plain, _attachment_path(email_cfg.get("anexo")), body_html, bcc=bcc)
+    return email_sender.send(to, subject, plain, attachment_path(email_cfg.get("anexo")), body_html, bcc=bcc)
 
 
 # --- Registro --------------------------------------------------------------------------------

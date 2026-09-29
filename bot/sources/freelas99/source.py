@@ -428,7 +428,7 @@ class Freelas99Source(JobSource):
             telegram_api.edit_text(message_id, *self.render_approval(entry["project"], proposal))
         cb.answer("Novo texto gerado ✅")
 
-    def handle_message(self, message: dict) -> bool:
+    def handle_message(self, message: dict, config: dict) -> bool:
         """
         Mensagem solta com link de projeto do 99Freelas: responde com um menu
         (views.send_link_menu) — "📝 Preparar proposta", "💬 Respondeu", "🏆 Fechou" ou

@@ -1,0 +1,27 @@
+{
+  "keyboard": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "editf:e:me-1790000000000",
+          "text": "✏️ Editar destinatário"
+        },
+        {
+          "callback_data": "editf:a:me-1790000000000",
+          "text": "✏️ Editar assunto"
+        }
+      ],
+      [
+        {
+          "callback_data": "approve:me-1790000000000",
+          "text": "✅ Enviar"
+        },
+        {
+          "callback_data": "reject:me-1790000000000",
+          "text": "❌ Cancelar"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[E-mail]</b> 📧 <b>E-mail pra enviar</b>\n<b>Para:</b> roberta@teste.com.br\n<b>Recrutador(a):</b> Roberta\n<b>Assunto:</b> Vaga Front End Sr.\n<b>Anexo:</b> nenhum (apinfo_jobs.email.anexo vazio)\n\n<b>E-mail:</b>\nOlá, Roberta!\nVaga: Vaga Front End Sr.\nPedro"
+}

@@ -1,0 +1,16 @@
+{
+  "chat_id": "4242",
+  "disable_web_page_preview": true,
+  "parse_mode": "HTML",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "retry:me-1790000000000",
+          "text": "🔄 Tentar de novo"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[E-mail]</b> ⚠️ Falha ao enviar e-mail\n<b>Para:</b> roberta@teste.com.br\n<b>Assunto:</b> Vaga Front End Sr.\n<b>Detalhe:</b> erro SMTP: (535, &#x27;senha errada&#x27;)"
+}
