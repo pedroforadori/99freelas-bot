@@ -9,7 +9,8 @@ O APinfo limita consultas por IP, então o bot standalone dormia 8–20s entre r
 polling de aprovações das outras fontes por até ~15min. Por isso a fonte é uma máquina de
 estados que dá NO MÁXIMO um passo por tick (ritmo APPROVAL_POLL_INTERVAL_SECONDS), e só
 quando a pausa sorteada já passou (client.Apinfo.ready):
-  run_cycle → agenda uma busca nova (a cada apinfo_jobs.intervalo_busca_min, com backoff)
+  run_cycle → agenda uma busca nova (a cada apinfo_jobs.intervalo_busca_min, com backoff;
+              ou, com apinfo_jobs.horario_diario, uma vez por dia a partir desse horário)
   tick      → avança a busca (1 requisição) OU candidata-se a 1 vaga da fila
             → fila vazia: manda o resumo e agenda a próxima busca
 """
@@ -30,6 +31,25 @@ MODOS = ("real", "teste", "sem_email")
 
 def _cfg(config: dict) -> dict:
     return config.get("apinfo_jobs") or {}
+
+
+def _horario_diario(config: dict) -> tuple[int, int] | None:
+    """apinfo_jobs.horario_diario ("HH:MM") → (hora, minuto); None = modo intervalo.
+    Aceita também o int que o YAML gera pra 9:00 sem aspas (sexagesimal: 540 min)."""
+    valor = _cfg(config).get("horario_diario")
+    if valor in (None, ""):
+        return None
+    try:
+        if isinstance(valor, int):
+            h, m = divmod(valor, 60)
+        else:
+            h, m = (int(x) for x in str(valor).split(":"))
+        if 0 <= h < 24 and 0 <= m < 60:
+            return h, m
+    except ValueError:
+        pass
+    log.warning("apinfo_jobs.horario_diario=%r inválido (use \"HH:MM\"); usando 08:00", valor)
+    return 8, 0
 
 
 def _credenciais() -> tuple[str, str] | None:
@@ -73,12 +93,21 @@ class ApinfoSource(JobSource):
         """Só agenda a busca — nenhuma requisição aqui (ver docstring do módulo)."""
         if self._search is not None or self._fila or client.now() < self._next_search_at:
             return
+        diario = _horario_diario(config)
+        if diario is not None:
+            agora = client.agora()
+            hoje = agora.strftime("%Y-%m-%d")
+            if client.last_search_date() == hoje or (agora.hour, agora.minute) < diario:
+                return
         if _credenciais() is None:
             if not self._avisou_credenciais:
                 log.warning("apinfo_jobs ligado sem APINFO_CPF/APINFO_SENHA no .env — APinfo parado.")
                 views.notify_missing_credentials()
                 self._avisou_credenciais = True
             return
+        if diario is not None:
+            # Marca ANTES de buscar: bloqueio, erro ou reinício no meio não geram 2ª busca hoje.
+            client.set_last_search_date(hoje)
         log.info("APinfo: iniciando busca (modo %s)", self._modo(config))
         self._search = client.search_steps(self._get_api(config), _cfg(config).get("busca") or {})
 
@@ -151,6 +180,16 @@ class ApinfoSource(JobSource):
             views.send_resumo(self._resultados, parada, self._restantes, self._modo(config))
         if parada is None:
             self._bloqueios = 0
+        diario = _horario_diario(config)
+        if diario is not None:
+            # Uma busca por dia: a próxima é amanhã no horário (sem backoff — já é bem espaçado).
+            self._next_search_at = 0.0
+            hora = f"{diario[0]:02d}:{diario[1]:02d} de amanhã"
+            if self._bloqueios:
+                views.notify_blocked(self._bloqueios, hora)
+            log.info("APinfo: próxima busca às %s.", hora)
+            self._resultados, self._restantes = [], 0
+            return
         intervalo_min = _cfg(config).get("intervalo_busca_min", 60)
         if intervalo_min < client.INTERVALO_MIN_SEGURO:
             log.info("apinfo_jobs.intervalo_busca_min=%s muito baixo; usando %s", intervalo_min, client.INTERVALO_MIN_SEGURO)

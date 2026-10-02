@@ -42,6 +42,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.pa
 _LOCK = threading.Lock()
 DATA_PATH = os.path.join(BASE_DIR, "data", "apinfo_jobs.json")
 DEBUG_DIR = os.path.join(BASE_DIR, "data", "apinfo_debug")
+STATE_PATH = os.path.join(BASE_DIR, "data", "apinfo_state.json")  # data da última busca (horario_diario)
 
 # Pisos anti-bloqueio: valores menores no config.yaml são ignorados.
 PAUSA_MIN_SEGURA = 6           # s entre requisições ao APinfo
@@ -56,6 +57,11 @@ IGNORED_EMAIL_DOMAINS = ("apinfo.com", "apinfo2.com")
 def now() -> float:
     """Relógio de todas as pausas (monotônico). Função própria pra os testes controlarem o tempo."""
     return time.monotonic()
+
+
+def agora() -> datetime:
+    """Hora local (fuso do container) pro horario_diario. Função própria pros testes."""
+    return datetime.now()
 
 
 class RateLimited(Exception):
@@ -431,6 +437,25 @@ def _save(data: dict) -> None:
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, DATA_PATH)
+
+
+def last_search_date() -> str | None:
+    """Data (AAAA-MM-DD) da última busca do modo horario_diario — em disco, pra um reinício
+    do bot não disparar uma segunda busca no mesmo dia."""
+    with _LOCK:
+        if not os.path.exists(STATE_PATH):
+            return None
+        with open(STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f).get("ultima_busca")
+
+
+def set_last_search_date(data: str) -> None:
+    with _LOCK:
+        os.makedirs(os.path.dirname(STATE_PATH), exist_ok=True)
+        tmp_path = STATE_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump({"ultima_busca": data}, f)
+        os.replace(tmp_path, STATE_PATH)
 
 
 def get_record(codigo: str) -> dict | None:

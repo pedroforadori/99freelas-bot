@@ -4,6 +4,7 @@ ApinfoSource (um passo por tick, só quando a pausa anti-bloqueio passou). Sem r
 HTTP do APinfo é um site falso em requests.Session.request, o SMTP é mockado e o relógio
 (client.now) é controlado pelo teste.
 """
+from datetime import datetime
 from urllib.parse import parse_qsl
 
 import pytest
@@ -444,3 +445,42 @@ def test_pisos_anti_bloqueio():
     api = client.Apinfo(1, 2, (5, 6))
     assert api.pausa_min == client.PAUSA_MIN_SEGURA and api.pausa_max >= api.pausa_min * 1.5
     assert api.pausa_vaga[0] == client.PAUSA_VAGA_MIN_SEGURA
+
+
+def test_horario_diario_busca_uma_vez_por_dia_mesmo_reiniciando(site, clock, sent, telegram, monkeypatch):
+    _duas_vagas(site)
+    hora = {"agora": datetime(2026, 9, 30, 8, 59)}
+    monkeypatch.setattr(client, "agora", lambda: hora["agora"])
+    config = _config(horario_diario="09:00")
+
+    def rodada(fonte):
+        fonte.run_cycle(config)
+        for _ in range(6):
+            clock(200)
+            fonte.tick(config)
+
+    fonte = ApinfoSource()
+    rodada(fonte)
+    assert site.count("list4.cfm") == 0  # antes do horário
+
+    hora["agora"] = datetime(2026, 9, 30, 9, 5)
+    rodada(fonte)
+    assert site.count("list4.cfm") == 1 and len(sent) == 2
+
+    clock(60 * 60 * 5)  # passou muito mais que intervalo_busca_min: ignorado no modo diário
+    hora["agora"] = datetime(2026, 9, 30, 23, 0)
+    rodada(fonte)
+    rodada(ApinfoSource())  # reinício do bot no mesmo dia
+    assert site.count("list4.cfm") == 1
+
+    hora["agora"] = datetime(2026, 10, 1, 9, 0)
+    rodada(ApinfoSource())
+    assert site.count("list4.cfm") == 2
+
+
+@pytest.mark.parametrize("valor, esperado", [
+    (None, None), ("", None), ("09:30", (9, 30)), (540, (9, 0)), ("25:00", (8, 0)), ("x", (8, 0)),
+])
+def test_horario_diario_parse(valor, esperado):
+    from bot.sources.apinfo.source import _horario_diario
+    assert _horario_diario(_config(horario_diario=valor)) == esperado
