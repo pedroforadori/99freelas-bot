@@ -1,0 +1,13 @@
+{
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "msgsend:17343568-12",
+          "text": "✅ Enviar pro cliente"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[99Freelas]</b> 📝 Resposta da IA pra aprovar — <b>Bruno M.</b>\nProjeto: <i>Finalização de sistema para salões</i>\n\n💬 <b>Cliente:</b>\nfala meu brother\n\nVocê consegue integrar com o Asaas?\n\n🤖 <b>Resposta da IA (NÃO enviada):</b>\n<code>Fala, Bruno!\n\nConsigo sim, já integrei com o Asaas.\n\nBora?</code>\n\n<a href=\"https://www.99freelas.com.br/messages/inbox/17343568\">Abrir conversa no site</a>\n↩️ <i>Aprove pelo botão (sai em partes, como alguém digitando), ou responda a esta mensagem com o seu texto.</i>"
+}

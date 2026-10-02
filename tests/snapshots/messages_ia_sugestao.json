@@ -1,0 +1,13 @@
+{
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "msgsend:17343568-12",
+          "text": "✅ Enviar sugestão"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[99Freelas]</b> ✋ Precisa de você — <b>Bruno M.</b>\nProjeto: <i>Finalização de sistema para salões</i>\n\n💬 <b>Cliente:</b>\nfala meu brother\n\nVocê consegue integrar com o Asaas?\n\n⚠️ <i>A IA não respondeu sozinha: a resposta da IA cita um valor que você ainda não tinha passado (R$ 900,00)</i>\n\n✍️ <b>Sugestão da IA (NÃO enviada):</b>\n<code>Fecho por R$ 900,00, pode ser?</code>\n\n<a href=\"https://www.99freelas.com.br/messages/inbox/17343568\">Abrir conversa no site</a>\n↩️ <i>Envie a sugestão pelo botão, ou responda a esta mensagem com o seu texto.</i>"
+}

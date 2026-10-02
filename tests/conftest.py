@@ -162,9 +162,11 @@ def _data_paths():
         (manual_queue, "DATA_PATH", "manual_queue.json"),
         (connections, "CACHE_PATH", "connections.json"),
         (messages, "CACHE_PATH", "messages_state.json"),
+        (messages, "THREADS_PATH", "message_threads.json"),
         (github_jobs, "DATA_PATH", "github_jobs.json"),
         (apinfo_client, "DATA_PATH", "apinfo_jobs.json"),
         (apinfo_client, "DEBUG_DIR", "apinfo_debug"),
+        (apinfo_client, "STATE_PATH", "apinfo_state.json"),
         (telegram_api, "_OFFSET_PATH", "telegram_offset.json"),
     ]
 

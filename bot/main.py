@@ -63,9 +63,13 @@ def process_pending_approvals() -> None:
                           entry["project_id"], e)
 
 
-def _poll_interval(sources: list[JobSource], normal: int, urgent: int) -> int:
+def _poll_interval(sources: list[JobSource], normal: int, urgent: int) -> float:
     try:
-        return urgent if any(s.urgent() for s in sources) else normal
+        if any(s.urgent() for s in sources):
+            return urgent
+        # Ex: mensagens de clientes (99Freelas) querem checagem mais frequente que o normal.
+        limites = [lim for s in sources if (lim := s.max_poll_interval())]
+        return min([normal, *limites])
     except Exception as e:
         log.exception("Erro ao checar urgência das fontes: %s", e)
         return normal

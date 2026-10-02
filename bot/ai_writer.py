@@ -405,3 +405,187 @@ def generate_portfolio_text(context: dict, config: dict) -> tuple[str, str] | No
         log.warning("Texto de portfólio da IA rejeitado (%s).", violation)
         return None
     return titulo, descricao
+
+
+# --- Resposta a mensagens de clientes (chat do 99Freelas) ------------------------------------
+# Usado por bot/messages.py pra responder SOZINHO clientes de projetos ainda em negociação
+# (decisão do usuário, 2026-09-30: velocidade de resposta converte; ele vê cada resposta no
+# Telegram e pode apagar do site). Por isso a trava é dupla, como nas propostas: regras no
+# prompt E check_chat_reply_safety no código — valor/prazo novo, contato ou link nunca saem
+# sem o usuário ver antes (a mensagem vira "sugestão" no Telegram em vez de ser enviada).
+
+_CHAT_MAX_CHARS = 1500
+
+_CHAT_SYSTEM_PROMPT = (
+    "Você é {nome}, desenvolvedor freelancer, respondendo um cliente no chat do 99Freelas "
+    "sobre um projeto em que você mandou proposta. Escreva EXATAMENTE a mensagem que {nome} "
+    "mandaria — em primeira pessoa, português do Brasil.\n\n"
+    "TOM (o mais importante):\n"
+    "- Humano e próximo, como uma conversa de chat entre pessoas: frases curtas, nada de "
+    "texto de robô, nada de 'Prezado', nada de listas longas. Espelhe o nível de formalidade "
+    "do cliente (se ele escreveu 'fala meu brother', pode responder 'Fala, Bruno!'). "
+    "Cumprimente pelo primeiro nome só na PRIMEIRA mensagem sua depois da proposta ou se o "
+    "cliente cumprimentou agora — no meio da conversa, vá direto ao ponto, como uma pessoa faria.\n"
+    "- Negociador: o objetivo é FECHAR o projeto. Mostre que entendeu o problema do cliente, "
+    "transmita segurança, defenda o valor pelo resultado (não por horas), e quando o escopo "
+    "crescer ou estiver vago proponha caminhos (dividir em etapas, começar por um diagnóstico, "
+    "priorizar o essencial) em vez de dar um número no chute. Seja transparente.\n"
+    "- Técnico na medida certa pra um leigo: mostre domínio explicando em linguagem simples o "
+    "que precisa ser feito e por quê (pode usar uma comparação do dia a dia). Se o cliente "
+    "falar em termos técnicos, acompanhe no mesmo nível.\n"
+    "- SEMPRE termine com um próximo passo claro que avance a negociação (uma ou duas "
+    "perguntas objetivas, ou o convite pra aceitar a proposta pelo site).\n"
+    "- Curta: normalmente 2 a 6 frases; no máximo ~1200 caracteres.\n"
+    "- Formato de chat: cada parágrafo vira uma mensagem SEPARADA no chat, enviada no tempo "
+    "de alguém digitando. Então escreva 1 a 3 parágrafos curtos separados por linha em "
+    "branco, cada um fazendo sentido sozinho. Se cumprimentar, o cumprimento fica SOZINHO na "
+    "primeira linha (ex: 'Fala, Bruno!'), seguido de linha em branco.\n\n"
+    "REGRAS OBRIGATÓRIAS, sem exceção:\n"
+    "- NUNCA escreva um valor em R$ ou um prazo (dias/semanas/meses) que {nome} ainda não "
+    "tenha dito nesta conversa. Pode repetir exatamente os já ditos. Se o cliente pedir "
+    "desconto, outro valor, outro prazo, ou perguntar 'consegue em X dias?', NÃO aceite nem "
+    "recuse com número novo: use acao \"escalar\".\n"
+    "- NUNCA inclua e-mail, telefone, WhatsApp, redes sociais, links, nem sugira conversar "
+    "fora do 99Freelas (é proibido pela plataforma). Nunca peça o contato do cliente.\n"
+    "- NUNCA invente fatos: projetos anteriores específicos, clientes, números, "
+    "certificações, horários livres. Fale de experiência só de forma geral. Não cite nomes "
+    "de ferramentas, empresas, plataformas ou tecnologias que não apareceram na conversa "
+    "(se precisar de um exemplo, fale genérico: 'a plataforma de pagamento que você usa').\n"
+    "- NUNCA prometa garantias absolutas ('100%', 'impossível dar erro', 'zero risco', "
+    "'fisicamente impossível') — transmita segurança explicando COMO você cuida do ponto.\n"
+    "- NUNCA diga ou insinue que é uma IA ou um assistente.\n"
+    "- Use acao \"escalar\" (não responder sozinho) quando: o cliente pede valor/prazo "
+    "novo ou desconto; quer marcar reunião/ligação com data e hora; pede informação que "
+    "só {nome} sabe (dados pessoais, links de trabalhos, disponibilidade exata); mandou "
+    "anexo que você não consegue ver e a resposta depende dele; reclama ou está insatisfeito; "
+    "ou você não tem certeza de como responder bem.\n\n"
+    "FORMATO: responda APENAS com um objeto JSON válido, sem markdown, num destes formatos:\n"
+    '{{"acao": "responder", "texto": "<mensagem pro cliente>"}}\n'
+    '{{"acao": "escalar", "motivo": "<por que {nome} precisa decidir, em uma frase>", '
+    '"rascunho": "<sugestão de mensagem pro {nome} revisar, seguindo as mesmas regras>"}}'
+)
+
+
+def _build_chat_user_prompt(ctx: dict, skills: list) -> str:
+    historico = "\n\n".join(f"[{quem}]: {texto}" for quem, texto in ctx["historico"]) or "(sem mensagens anteriores)"
+    novas = "\n\n".join(ctx["novas"])
+    anexo = "\n(O cliente mandou ANEXO junto — você não consegue ver o conteúdo.)" if ctx.get("tem_anexo") else ""
+    if ctx.get("ja_conversou"):
+        # Instrução só no system prompt não bastou: o Gemini cumprimentava ("Fala, Bruno!")
+        # em toda resposta, o que no meio de uma conversa soa como robô (testado 2026-09-30).
+        anexo += (
+            "\n\nIMPORTANTE: você JÁ está no meio da conversa com esse cliente. NÃO comece "
+            "com cumprimento ('Fala', 'Oi', 'Olá', nome do cliente) — vá direto ao assunto."
+        )
+    return (
+        f"Projeto: {ctx['projeto']}\n"
+        f"Cliente: {ctx['cliente']}\n"
+        f"Minhas habilidades/áreas: {', '.join(skills) if skills else '(não informado)'}\n\n"
+        f"Conversa até agora (mais antiga primeiro; mensagens de sistema do site mostram a "
+        f"proposta que enviei, com valor e prazo):\n{historico}\n\n"
+        f"MENSAGEM(NS) NOVA(S) DO CLIENTE, que você deve responder:\n{novas}{anexo}\n\n"
+        "Responda seguindo todas as regras do system prompt (só o JSON)."
+    )
+
+
+_MONEY_PATTERN = re.compile(
+    r"R\$\s*(\d[\d.]*(?:,\d{1,2})?)|(\d+(?:[.,]\d+)?)\s*mil\b|(\d[\d.]*(?:,\d{1,2})?)\s*reais\b", re.I
+)
+_DURATION_PATTERN = re.compile(r"(\d+)\s*(dias?|semanas?|m[eê]s(?:es)?)\b", re.I)
+_DURATION_DAYS = {"d": 1, "s": 7, "m": 30}
+
+
+def _br_number(raw: str) -> float:
+    return float(raw.replace(".", "").replace(",", "."))
+
+
+def _money_values(text: str) -> set[float]:
+    valores = set()
+    for m in _MONEY_PATTERN.finditer(text):
+        if m.group(1):
+            valores.add(round(_br_number(m.group(1)), 2))
+        elif m.group(2):
+            valores.add(round(float(m.group(2).replace(",", ".")) * 1000, 2))
+        else:
+            valores.add(round(_br_number(m.group(3)), 2))
+    return valores
+
+
+def _durations_days(text: str) -> set[int]:
+    return {int(n) * _DURATION_DAYS[u[0].lower()] for n, u in _DURATION_PATTERN.findall(text)}
+
+
+def check_chat_reply_safety(texto: str, meus_textos: list[str]) -> str | None:
+    """
+    Motivo se a resposta da IA NÃO pode ser enviada sozinha, ou None. Valor em R$ e prazo
+    só podem ser os que o freelancer já disse na conversa (inclui a proposta enviada, que
+    aparece como mensagem de sistema) — qualquer número novo é compromisso que o usuário
+    precisa ver antes.
+    """
+    if not texto.strip():
+        return "resposta vazia"
+    if _EMAIL_PATTERN.search(texto):
+        return "contém um e-mail"
+    if _URL_PATTERN.search(texto):
+        return "contém um link"
+    if _PHONE_PATTERN.search(texto):
+        return "contém um possível telefone"
+    if re.search(r"whats\s?app|\bzap\b|telegram|instagram", texto, re.I):
+        return "menciona contato fora da plataforma"
+    if len(texto) > _CHAT_MAX_CHARS:
+        return f"resposta muito longa ({len(texto)} caracteres)"
+    ja_ditos = "\n".join(meus_textos)
+    novos_valores = _money_values(texto) - _money_values(ja_ditos)
+    if novos_valores:
+        valores = ", ".join(f"R$ {v:.2f}".replace(".", ",") for v in sorted(novos_valores))
+        return f"cita um valor que você ainda não tinha passado ({valores})"
+    novos_prazos = _durations_days(texto) - _durations_days(ja_ditos)
+    if novos_prazos:
+        prazos = ", ".join(f"{d} dias" for d in sorted(novos_prazos))
+        return f"cita um prazo que você ainda não tinha passado ({prazos})"
+    return None
+
+
+def generate_chat_reply(ctx: dict, config: dict) -> dict | None:
+    """
+    Resposta pro cliente. `ctx`: freelancer (primeiro nome), cliente, projeto, historico
+    [(quem, texto)], novas [texto], tem_anexo, ja_conversou (freelancer já mandou mensagem
+    própria, fora a proposta). Retorna {"acao": "responder", "texto"} ou
+    {"acao": "escalar", "motivo", "rascunho"}; None se a IA falhar ou responder fora do
+    formato. Não aplica check_chat_reply_safety — quem chama faz isso (precisa dos textos
+    já ditos pelo freelancer).
+    """
+    proposal_cfg = config.get("proposal", {})
+    provider_name = proposal_cfg.get("ia_provider", "anthropic")
+    provider = _PROVIDERS.get(provider_name)
+    if not provider:
+        log.warning("ia_provider '%s' desconhecido (use 'anthropic' ou 'gemini').", provider_name)
+        return None
+    generate_fn, default_model = provider
+    model = proposal_cfg.get("ia_model", default_model)
+
+    system_prompt = _CHAT_SYSTEM_PROMPT.format(nome=ctx.get("freelancer") or "o freelancer")
+    user_prompt = _build_chat_user_prompt(ctx, config.get("keywords_include", []))
+    raw = generate_fn(user_prompt, model, system_prompt=system_prompt)
+    if not raw:
+        log.warning("IA (%s) não gerou resposta pro cliente.", provider_name)
+        return None
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        log.warning("Resposta de chat da IA não é JSON válido: %r", raw[:200])
+        return None
+    if not isinstance(data, dict):
+        log.warning("Resposta de chat da IA fora do formato: %r", raw[:200])
+        return None
+    if data.get("acao") == "responder" and isinstance(data.get("texto"), str) and data["texto"].strip():
+        return {"acao": "responder", "texto": data["texto"].strip()}
+    if data.get("acao") == "escalar":
+        return {
+            "acao": "escalar",
+            "motivo": str(data.get("motivo") or "a IA preferiu não responder sozinha").strip(),
+            "rascunho": str(data.get("rascunho") or "").strip(),
+        }
+    log.warning("Resposta de chat da IA fora do formato: %r", raw[:200])
+    return None

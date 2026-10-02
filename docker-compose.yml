@@ -5,6 +5,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Horário de Brasília nos horários mostrados no Telegram (ex: partes agendadas das
+      # respostas da IA). Formato POSIX (UTC-3 fixo, sem horário de verão desde 2019):
+      # funciona mesmo se a imagem não tiver o pacote tzdata.
+      - TZ=<-03>3
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data

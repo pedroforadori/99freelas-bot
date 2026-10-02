@@ -57,7 +57,7 @@ class TelegramDispatcher:
             message = update.get("message")
             if message:
                 if message.get("reply_to_message"):
-                    self._on_edit_reply(message)
+                    self._on_reply(message)
                 else:
                     self._on_message(message)
 
@@ -138,17 +138,24 @@ class TelegramDispatcher:
             return
         cb.answer()
 
-    def _on_edit_reply(self, message: dict) -> None:
+    def _on_reply(self, message: dict) -> None:
         """
-        Resposta de texto a um prompt de edição. Só age se reply_to_message apontar pra um
-        pending_edit em aberto — qualquer outra mensagem no chat é ignorada sem aviso. Valor
-        inválido: avisa e mantém o pending_edit, pro usuário responder de novo à mesma
-        pergunta.
+        Reply: prompt de edição de campo (approvals) primeiro; senão, a primeira fonte que
+        reconhecer (JobSource.handle_reply). Reply a qualquer outra coisa é ignorado.
         """
         found = approvals.find_by_prompt_message_id(message["reply_to_message"]["message_id"])
-        if not found:
+        if found:
+            self._on_edit_reply(message, *found)
             return
-        project_id, code = found
+        for source in self.sources:
+            if source.handle_reply(message, self.config):
+                return
+
+    def _on_edit_reply(self, message: dict, project_id: str, code: str) -> None:
+        """
+        Resposta de texto a um prompt de edição (pending_edit em aberto). Valor inválido:
+        avisa e mantém o pending_edit, pro usuário responder de novo à mesma pergunta.
+        """
 
         entry = approvals.get_pending(project_id)
         if entry is None or entry["decision"] is not None:

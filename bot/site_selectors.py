@@ -21,6 +21,20 @@ DASHBOARD_URL = "https://www.99freelas.com.br/dashboard"
 MESSAGES_BADGE_CONTAINER = "div.box-mensagem-count"
 MESSAGES_BADGE_VALUE = "div.box-mensagem-count .count-value"
 
+# --- Mensagens (API JSON da caixa de entrada, usada pelo próprio site em /messages) ---
+# Descoberta lendo chat.js/ConversaMod.js/MensagemMod.js do site (2026-09-30). GET com
+# ?data=<JSON url-encoded>; POST com corpo form "data=<JSON>". A resposta vem como JSON
+# url-encoded: {"status": {"id": 1}, "result": ...} — 1 = sucesso, 6 = falha com motivo
+# (failInfo.key), 8 = deslogado. Leitura confirmada ao vivo; ENVIO e EXCLUSÃO ainda não
+# (o id da mensagem criada vem em result.id, segundo mensagens-conversa.js).
+MESSAGES_API_CONVERSATIONS = "https://www.99freelas.com.br/services/user/carregarConversas"
+# visualizar=False: o chat do site usa True ao abrir uma conversa (marca como lida).
+MESSAGES_API_LIST = "https://www.99freelas.com.br/services/consultas/listarMensagensConversa"
+MESSAGES_API_SEND = "https://www.99freelas.com.br/services/user/enviarMensagemConversa"
+# O "Excluir" de cada mensagem no chat do site: POST .../<idMensagem>?deletar=true (false desfaz).
+MESSAGES_API_DELETE = "https://www.99freelas.com.br/services/user/deletarMensagemConversa/{id}"
+CONVERSATION_URL = "https://www.99freelas.com.br/messages/inbox/{id}"
+
 # --- Login ---
 LOGIN_URL = "https://www.99freelas.com.br/login"
 LOGIN_EMAIL_INPUT = "#email"

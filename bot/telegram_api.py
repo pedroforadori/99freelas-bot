@@ -99,33 +99,32 @@ def call(method: str, payload: dict) -> dict | list | None:
         return None
 
 
-def send_with_keyboard(text: str, reply_markup: dict) -> int | None:
-    """Manda uma mensagem com teclado e devolve o message_id (None se falhar)."""
-    result = call(
-        "sendMessage",
-        {
-            "chat_id": chat_id(),
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-            "reply_markup": reply_markup,
-        },
-    )
+def send_with_keyboard(text: str, reply_markup: dict | None) -> int | None:
+    """Manda uma mensagem (com teclado, se houver) e devolve o message_id (None se falhar)."""
+    payload = {
+        "chat_id": chat_id(),
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    result = call("sendMessage", payload)
     return result.get("message_id") if isinstance(result, dict) else None
 
 
-def edit_text(message_id: int, text: str, reply_markup: dict) -> None:
-    call(
-        "editMessageText",
-        {
-            "chat_id": chat_id(),
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-            "reply_markup": reply_markup,
-        },
-    )
+def edit_text(message_id: int, text: str, reply_markup: dict | None) -> None:
+    """Sem reply_markup, o Telegram tira os botões da mensagem."""
+    payload = {
+        "chat_id": chat_id(),
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    call("editMessageText", payload)
 
 
 def edit_reply_markup(message_id: int, reply_markup: dict) -> None:

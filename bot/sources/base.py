@@ -76,6 +76,10 @@ class JobSource(ABC):
     def tick(self, config: dict) -> None:
         """Trabalho do loop interno (ritmo APPROVAL_POLL_INTERVAL_SECONDS), entre varreduras."""
 
+    def max_poll_interval(self) -> float | None:
+        """Maior espera aceitável entre dois ticks (None = tanto faz): o loop usa a menor."""
+        return None
+
     def urgent(self) -> bool:
         """
         True enquanto houver item sensível a velocidade (ex: proposta promovida — só um
@@ -179,6 +183,14 @@ class JobSource(ABC):
 
     def handle_message(self, message: dict, config: dict) -> bool:
         """Mensagem solta no chat (não é reply). True = tratou (as outras fontes não veem)."""
+        return False
+
+    def handle_reply(self, message: dict, config: dict) -> bool:
+        """
+        Reply a uma mensagem que NÃO é prompt de edição de campo (esses o dispatcher resolve
+        sozinho, via approvals) — ex: responder a um cliente respondendo à notificação da
+        mensagem dele. True = tratou.
+        """
         return False
 
     def retry_preparation(self, cb: Callback) -> tuple[str, str] | None:

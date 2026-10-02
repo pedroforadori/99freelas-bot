@@ -1,9 +1,9 @@
 """
 Fonte 99Freelas: varredura da listagem de projetos (Playwright), preparo da proposta
 (submitter/proposal/IA) e envio de verdade depois da aprovação no Telegram. Também é dona
-do trabalho de fundo específico do site — links colados no chat (manual_queue), badge de
-mensagens não lidas (messages.py) — e dos botões exclusivos dela (texto via IA de novo,
-menu de link).
+do trabalho de fundo específico do site — links colados no chat (manual_queue), mensagens
+de clientes e respostas a elas pelo Telegram (messages.py) — e dos botões exclusivos dela
+(texto via IA de novo, menu de link).
 """
 import os
 import random
@@ -99,13 +99,13 @@ class Freelas99Source(JobSource):
 
     def __init__(self):
         self.page = None
-        self._messages_poll_interval = 60
+        self._messages_poll_interval = 15
         self._next_messages_check_at = 0.0  # força checar mensagens já no primeiro tick
 
     # --- ciclo de vida -------------------------------------------------------------------
 
     def start(self, browser) -> bool:
-        self._messages_poll_interval = int(os.environ.get("MESSAGES_POLL_INTERVAL_SECONDS", 60))
+        self._messages_poll_interval = int(os.environ.get("MESSAGES_POLL_INTERVAL_SECONDS", 15))
         self.page = auth.open_authenticated_page(browser)
         return self.page is not None
 
@@ -139,6 +139,7 @@ class Freelas99Source(JobSource):
 
         queued_count = 0
         for project in new_projects:
+            self._service_messages(config)
             match, reason = is_match(project, config)
             if not match:
                 log.info("Ignorado: '%s' — %s", project["title"], reason)
@@ -175,7 +176,7 @@ class Freelas99Source(JobSource):
             queued_count += 1
 
             # delay curto entre preparos dentro do mesmo ciclo, pra não parecer um robô disparando em rajada
-            time.sleep(_pausa_entre_preparos(proposal, 5, 15))
+            self._pause(_pausa_entre_preparos(proposal, 5, 15), config)
 
     def _queue(self, project: dict, proposal: dict, detail: str) -> None:
         self.queue_for_approval(project, proposal)
@@ -195,6 +196,7 @@ class Freelas99Source(JobSource):
         """
         max_horas = config.get("proposal", {}).get("aguardar_media_max_horas", 48)
         for project_id, rec in storage.list_by_status("awaiting_average").items():
+            self._service_messages(config)
             project = rec.get("project")
             if not project:
                 continue
@@ -219,15 +221,49 @@ class Freelas99Source(JobSource):
                 continue
 
             self._queue(project, proposal, detail="aguardando aprovação no Telegram")
-            time.sleep(_pausa_entre_preparos(proposal, 3, 8))
+            self._pause(_pausa_entre_preparos(proposal, 3, 8), config)
 
     def tick(self, config: dict) -> None:
+        # Respostas/botões de mensagens primeiro: o usuário acabou de agir e espera ver o envio.
+        messages.process_outbox(self.page)
+        self._service_messages(config)
         self.process_manual_projects(config)
-        # Mensagens não lidas numa cadência própria (MESSAGES_POLL_INTERVAL_SECONDS), mais
-        # espaçada que o tick — cada checagem navega até /dashboard (messages.refresh).
-        if time.time() >= self._next_messages_check_at:
-            messages.check_and_notify(self.page)
-            self._next_messages_check_at = time.time() + self._messages_poll_interval
+
+    def max_poll_interval(self) -> float | None:
+        # Acorda também na hora da próxima parte agendada de uma resposta da IA ("como uma
+        # pessoa digitando", messages.schedule_parts) — senão ela sairia até 15s atrasada.
+        proxima = messages.next_send_in()
+        if proxima is None:
+            return self._messages_poll_interval
+        return max(2.0, min(self._messages_poll_interval, proxima))
+
+    def _service_messages(self, config: dict) -> None:
+        """
+        Mensagens de clientes na cadência MESSAGES_POLL_INTERVAL_SECONDS — chamada no tick E no
+        meio da varredura (entre projetos e nas pausas), porque um ciclo com vários preparos
+        leva minutos e resposta rápida ao cliente converte. Só usa a API do site
+        (page.context.request), não navega a Page — seguro no meio do run_cycle. Nunca deixa
+        um erro aqui derrubar a varredura. Também solta as partes agendadas de respostas da
+        IA que já deram a hora (process_outbox é barato quando não há nada).
+        """
+        try:
+            messages.process_outbox(self.page)
+        except Exception as e:
+            log.exception("Erro ao enviar mensagens agendadas: %s", e)
+        if time.time() < self._next_messages_check_at:
+            return
+        self._next_messages_check_at = time.time() + self._messages_poll_interval
+        try:
+            messages.check_and_notify(self.page, config)
+        except Exception as e:
+            log.exception("Erro ao checar mensagens de clientes: %s", e)
+
+    def _pause(self, seconds: float, config: dict) -> None:
+        """time.sleep(seconds) que continua atendendo mensagens de clientes no meio."""
+        passos = max(1, int(seconds // 2))
+        for _ in range(passos):
+            self._service_messages(config)
+            time.sleep(seconds / passos)
 
     def process_manual_projects(self, config: dict) -> None:
         """
@@ -361,7 +397,72 @@ class Freelas99Source(JobSource):
             "retryia": CallbackRoute(arity=1, handler=self._on_retry_ia_text),
             "link": CallbackRoute(arity=2, handler=self._on_link_action),
             "promo": CallbackRoute(arity=1, handler=self._on_toggle_promovida),
+            "msgdel": CallbackRoute(arity=1, handler=self._on_delete_message),
+            "msgsend": CallbackRoute(arity=1, handler=self._on_send_draft),
+            "msgcancel": CallbackRoute(arity=1, handler=self._on_cancel_group),
         }
+
+    def _on_delete_message(self, cb: Callback) -> None:
+        """
+        "🗑️ Apagar do site": `msgdel:<idMensagem>` (resposta sua) ou `msgdel:<conversa>-<idMensagem>`
+        (resposta da IA em partes — apaga todas as já enviadas e cancela o que falta). O tick apaga.
+        """
+        (alvo,) = cb.args
+        message_id = cb.message.get("message_id")
+        if alvo.isdigit():
+            messages.queue_delete([int(alvo)], message_id)
+            quantas = 1
+        elif re.fullmatch(r"\d+-\d+", alvo):
+            quantas = messages.queue_group_delete(alvo, message_id)
+            if quantas is None:
+                cb.answer("Não achei essa resposta (muito antiga?). Apague pelo site.")
+                return
+            if quantas == 0:
+                cb.answer("Nada tinha sido enviado ainda — cancelei o que faltava.")
+                return
+        else:
+            cb.answer()
+            return
+        if message_id:
+            telegram_api.edit_reply_markup(message_id, telegram_api.static_label_keyboard("⏳ Apagando..."))
+        cb.answer("Apagando do site..." if quantas == 1 else f"Apagando {quantas} mensagens do site...")
+
+    def _on_cancel_group(self, cb: Callback) -> None:
+        """"✋ Cancelar o que falta" numa resposta da IA sendo enviada em partes."""
+        (gid,) = cb.args
+        resultado = messages.cancel_group(gid) if re.fullmatch(r"\d+-\d+", gid) else None
+        if resultado is None:
+            cb.answer("Não achei essa resposta (muito antiga?).")
+            return
+        canceladas, enviadas = resultado
+        if not canceladas:
+            cb.answer("Não faltava nada — já tinha sido tudo enviado.")
+        elif enviadas:
+            cb.answer(f"Cancelado. {enviadas} parte(s) já tinha(m) saído — use 🗑️ pra apagar.")
+        else:
+            cb.answer("Cancelado — nada foi enviado pro cliente.")
+
+    def _on_send_draft(self, cb: Callback) -> None:
+        """"✅ Enviar sugestão": manda pro cliente a sugestão da IA que ela não enviou sozinha."""
+        (draft_id,) = cb.args
+        message_id = cb.message.get("message_id")
+        # Trava o botão ANTES (evita duplo clique); queue_draft ainda confere se já foi.
+        if message_id:
+            telegram_api.edit_reply_markup(message_id, telegram_api.static_label_keyboard("⏳ Enviando..."))
+        tipo = messages.queue_draft(draft_id, message_id)
+        if tipo is None:
+            if message_id:
+                telegram_api.edit_reply_markup(message_id, telegram_api.static_label_keyboard("Já enviada (ou expirou)"))
+            cb.answer("Essa resposta já foi enviada (ou expirou).")
+            return
+        if tipo == "partes":
+            if message_id:
+                telegram_api.edit_reply_markup(
+                    message_id, telegram_api.static_label_keyboard("✅ Aprovada — acompanhe o envio abaixo")
+                )
+            cb.answer("Aprovada! Sai em partes, como alguém digitando.")
+            return
+        cb.answer("Enviando a sugestão pro cliente...")
 
     def _on_toggle_promovida(self, cb: Callback) -> None:
         """
@@ -448,6 +549,28 @@ class Freelas99Source(JobSource):
 
         for project_id, slug in matches.items():
             views.send_link_menu(project_id, views.project_url(slug))
+        return True
+
+    def handle_reply(self, message: dict, config: dict) -> bool:
+        """
+        Reply a uma notificação de mensagem de cliente (ou à confirmação de uma resposta):
+        o texto vai pra fila de messages.py e o tick envia pro cliente. Só do próprio
+        TELEGRAM_CHAT_ID — é uma mensagem real pra um cliente, em nome do usuário.
+        """
+        chat_id = telegram_api.chat_id()
+        if not chat_id or str(message.get("chat", {}).get("id")) != str(chat_id):
+            return False
+        texto = (message.get("text") or "").strip()
+        reply_to = message["reply_to_message"]["message_id"]
+        if not texto:
+            if messages.find_thread(reply_to) is None:
+                return False
+            telegram_api.send_message(f"{self.tag} Só dá pra responder o cliente com texto (anexo, foto e áudio: pelo site).")
+            return True
+        conversa = messages.queue_reply(reply_to, texto)
+        if conversa is None:
+            return False
+        log.info("Resposta pra %s (conversa %s) enfileirada.", conversa["cliente"], conversa["id"])
         return True
 
     def _on_link_action(self, cb: Callback) -> None:

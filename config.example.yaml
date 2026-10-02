@@ -100,6 +100,38 @@ proposal:
   # do jeito exato escrito aqui — nunca reformulada pela IA. null/"" = não anexa nada.
   nota_extra: null
 
+# Mensagens de clientes no chat do 99Freelas (bot/messages.py). Toda mensagem nova de
+# cliente chega no Telegram; responder (reply) a ela no Telegram envia a resposta.
+mensagens:
+  # true = a IA responde SOZINHA conversas de projetos ainda em negociação (aberto, você não
+  # foi contratado, proposta não rejeitada), usando o ia_provider/ia_model de `proposal`.
+  # O Telegram mostra projeto + mensagem do cliente + resposta enviada, com "🗑️ Apagar do
+  # site". Ela NÃO envia sozinha (manda uma sugestão com "✅ Enviar sugestão") quando o
+  # cliente pede desconto/valor/prazo novo, reunião etc., ou quando a resposta citaria valor
+  # ou prazo que você ainda não passou na conversa, contato ou link.
+  resposta_automatica: true
+  # true = modo aprovação: a IA prepara a resposta (com espera, travas e divisão em partes),
+  # mas ela SÓ sai quando você clica em "✅ Enviar pro cliente" no Telegram — aí vai em
+  # partes, no ritmo de digitação. Deixe true até confiar nas respostas; false = envia sozinha.
+  aprovar_antes_de_enviar: true
+  # Depois de N respostas da IA na mesma conversa, as próximas viram sugestão pra você.
+  max_respostas_ia_por_conversa: 8
+  # Espera o cliente parar de escrever: só responde quando a última mensagem dele tiver
+  # esse tempo sem outra depois (quem manda "fala meu brother" e 15s depois a pergunta
+  # recebe UMA resposta pras duas). Se ele escrever no meio de uma resposta sendo enviada
+  # em partes, o que falta é cancelado e a IA responde tudo junto de novo.
+  aguardar_cliente_parar_segundos: 60
+  # Resposta da IA "como uma pessoa digitando": o cumprimento ("Fala, Bruno!", "Bom dia!")
+  # sai na hora; cada parágrafo seguinte vira uma mensagem separada, enviada depois do tempo
+  # de ler o cliente + pensar (só antes da 1ª) + digitar aquele texto. Cada parte tem o seu
+  # tempo, com variação aleatória dentro das faixas [mín, máx]. Enquanto falta parte, o
+  # Telegram mostra o plano com "✋ Cancelar o que falta".
+  digitacao:
+    caracteres_por_segundo: [3.5, 5.0]      # ~210–300 caracteres/minuto
+    pensar_segundos: [15, 45]               # antes da 1ª parte de conteúdo
+    pausa_entre_mensagens_segundos: [3, 10]
+    leitura_caracteres_por_segundo: 25      # tempo pra "ler" as mensagens do cliente (máx 60s)
+
 # Vagas publicadas como issues no GitHub (bot/github_jobs.py). A cada ciclo de varredura
 # o bot busca as issues abertas com TODAS as labels listadas; quando o corpo da issue tem
 # um e-mail, manda pro Telegram pra aprovação (✅ envia o e-mail, ❌ descarta). Sem e-mail,
@@ -139,8 +171,11 @@ apinfo_jobs:
   # "real" = e-mail pra empresa | "teste" = e-mail vai pra você (SMTP_USER), assunto
   # "[TESTE -> destino] ..." | "sem_email" = só se candidata e registra o contato.
   modo: "teste"
-  # De quantos em quantos minutos pesquisar (mínimo 30).
+  # De quantos em quantos minutos pesquisar (mínimo 30). Ignorado com horario_diario.
   intervalo_busca_min: 60
+  # "HH:MM" = pesquisa UMA vez por dia, na primeira checagem a partir desse horário (a data
+  # fica em data/apinfo_state.json — reiniciar o bot não repete a busca). null = usa o intervalo.
+  horario_diario: null
   # true = tenta de novo vagas que falharam antes (status "falhou").
   retentar_falhas: false
   busca:

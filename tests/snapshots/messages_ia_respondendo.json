@@ -1,0 +1,19 @@
+{
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "msgcancel:17343568-12",
+          "text": "✋ Cancelar o que falta"
+        }
+      ],
+      [
+        {
+          "callback_data": "msgdel:17343568-12",
+          "text": "🗑️ Apagar do site"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[99Freelas]</b> 🕒 A IA está respondendo <b>Bruno M.</b>\nProjeto: <i>Finalização de sistema para salões</i>\n\n💬 <b>Cliente:</b>\nfala meu brother\n\nVocê consegue integrar com o Asaas?\n\n🤖 <b>Resposta (em partes, como alguém digitando):</b>\n<i>✅ enviada às 14:13</i>\nFala, Bruno!\n\n<i>🕒 sai por volta das 14:13</i>\nConsigo sim. Bora?\n\n<a href=\"https://www.99freelas.com.br/messages/inbox/17343568\">Abrir conversa no site</a>\n↩️ <i>Responda a esta mensagem pra mandar outra (escrita por você).</i>"
+}

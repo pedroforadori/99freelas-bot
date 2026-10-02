@@ -6,6 +6,7 @@ por isso não importa source.py (evita ciclo de import).
 """
 import os
 import re
+from datetime import datetime
 
 from bot import connections, storage, telegram_api
 from bot import site_selectors as sel
@@ -37,6 +38,174 @@ def notify_new_messages(unread_count: int, previous_count: int) -> None:
         f'<a href="{sel.DASHBOARD_URL}">Ver no site</a>',
     ]
     telegram_api.send_message("\n".join(linhas))
+
+
+_REPLY_HINT = "↩️ <i>Responda a esta mensagem pra enviar a resposta pro cliente.</i>"
+_REPLY_HINT_OUTRA = "↩️ <i>Responda a esta mensagem pra mandar outra (escrita por você).</i>"
+
+
+def _conversa_header(conversa: dict) -> str:
+    projeto = f"\nProjeto: <i>{esc(conversa['projeto'])}</i>" if conversa.get("projeto") else ""
+    return f"<b>{esc(conversa['cliente'])}</b>{projeto}"
+
+
+def _conversa_link(conversa: dict) -> str:
+    return f'<a href="{sel.CONVERSATION_URL.format(id=conversa["id"])}">Abrir conversa no site</a>'
+
+
+def _cliente_bloco(mensagens: list[dict], max_chars: int) -> str:
+    corpo = "\n\n".join(
+        esc(m["texto"] or "(sem texto)") + ("\n📎 <i>tem anexo — veja no site</i>" if m.get("tem_arquivos") else "")
+        for m in mensagens
+    )
+    return telegram_api.truncate_escaped(corpo, max_chars, suffix="… (continua no site)")
+
+
+def delete_keyboard(mensagem_id) -> dict:
+    return telegram_api.single_button_keyboard("🗑️ Apagar do site", f"msgdel:{mensagem_id}")
+
+
+def notify_client_messages(conversa: dict, mensagens: list[dict], motivo_sem_ia: str | None = None) -> int | None:
+    """
+    Mensagem(ns) nova(s) de um cliente sem resposta automática (ver messages.check_and_notify).
+    `motivo_sem_ia`: por que a IA não respondeu (projeto já contratado/fechado etc.), quando
+    a resposta automática está ligada. Devolve o message_id — vira thread (reply = resposta).
+    """
+    cabecalho = f"{_PREFIX}💬 Nova mensagem de {_conversa_header(conversa)}\n\n"
+    aviso = f"\n\nℹ️ <i>A IA não respondeu: {esc(motivo_sem_ia)}.</i>" if motivo_sem_ia else ""
+    rodape = f"{aviso}\n\n{_conversa_link(conversa)}\n{_REPLY_HINT}"
+    corpo = _cliente_bloco(mensagens, telegram_api.MSG_LIMIT - len(cabecalho) - len(rodape) - 40)
+    return telegram_api.send_with_keyboard(cabecalho + corpo + rodape, None)
+
+
+_PARTE_STATUS = {
+    "sent": "✅ enviada às {hora}",
+    "pending": "🕒 sai por volta das {hora}",
+    "sending": "⏳ enviando...",
+    "cancelled": "✋ cancelada — não enviada",
+    "failed": "❌ recusada pelo site",
+    "uncertain": "⚠️ não sei se chegou — confira no site",
+    "superseded": "🔁 não enviada — o cliente escreveu de novo",
+}
+
+
+def _hora(epoch: float | None) -> str:
+    return datetime.fromtimestamp(epoch).strftime("%H:%M") if epoch else "?"
+
+
+def render_auto_reply(grupo: dict) -> tuple[str, dict | None]:
+    """
+    Resposta da IA enviada em partes (messages.py, "como uma pessoa digitando"): mostra o
+    cliente, cada parte com o horário (enviada / previsto) e os botões — "✋ Cancelar o que
+    falta" enquanto houver parte agendada, "🗑️ Apagar do site" quando alguma já saiu. A
+    mesma mensagem é editada a cada parte enviada.
+    """
+    conversa, partes = grupo["conversa"], grupo["partes"]
+    status = [p["status"] for p in partes]
+    abertas = any(st in ("pending", "sending") for st in status)
+    enviadas = any(st == "sent" for st in status)
+    if abertas:
+        titulo = f"🕒 A IA está respondendo {_conversa_header(conversa)}"
+    elif all(st == "sent" for st in status):
+        titulo = f"🤖 A IA respondeu {_conversa_header(conversa)}"
+    elif any(st == "superseded" for st in status):
+        titulo = f"🔁 Resposta da IA substituída (o cliente escreveu de novo) — {_conversa_header(conversa)}"
+    elif any(st in ("failed", "uncertain") for st in status):
+        titulo = f"⚠️ Resposta da IA interrompida — {_conversa_header(conversa)}"
+    else:
+        titulo = f"✋ Resposta da IA cancelada — {_conversa_header(conversa)}"
+
+    limite_parte = max(300, 2000 // max(1, len(partes)))
+    linhas_partes = []
+    for parte in partes:
+        hora = _hora(parte.get("sent_at") if parte["status"] == "sent" else parte.get("send_at"))
+        linhas_partes.append(
+            f"<i>{_PARTE_STATUS.get(parte['status'], parte['status']).format(hora=hora)}</i>\n"
+            f"{telegram_api.truncate_escaped(esc(parte['texto']), limite_parte, suffix='…')}"
+        )
+    cabecalho = f"{_PREFIX}{titulo}\n\n💬 <b>Cliente:</b>\n"
+    rodape = (
+        "\n\n🤖 <b>Resposta (em partes, como alguém digitando):</b>\n"
+        + "\n\n".join(linhas_partes)
+        + f"\n\n{_conversa_link(conversa)}\n{_REPLY_HINT_OUTRA}"
+    )
+    corpo = _cliente_bloco([{"texto": t} for t in grupo["cliente"]],
+                           telegram_api.MSG_LIMIT - len(cabecalho) - len(rodape) - 40)
+
+    botoes = []
+    if abertas:
+        botoes.append([{"text": "✋ Cancelar o que falta", "callback_data": f"msgcancel:{grupo['id']}"}])
+    if enviadas:
+        botoes.append([{"text": "🗑️ Apagar do site", "callback_data": f"msgdel:{grupo['id']}"}])
+    return cabecalho + corpo + rodape, ({"inline_keyboard": botoes} if botoes else None)
+
+
+def notify_escalation(
+    conversa: dict, mensagens: list[dict], motivo: str | None, rascunho: str, draft_id: str | None
+) -> int | None:
+    """
+    A IA não respondeu sozinha: mensagem do cliente, motivo e sugestão (não enviada).
+    motivo=None = modo aprovação (mensagens.aprovar_antes_de_enviar): a resposta passou em
+    todas as travas e só espera o seu clique — sai em partes, no ritmo de digitação.
+    """
+    if motivo is None:
+        cabecalho = f"{_PREFIX}📝 Resposta da IA pra aprovar — {_conversa_header(conversa)}\n\n💬 <b>Cliente:</b>\n"
+        titulo_sugestao, aviso, botao = "🤖 <b>Resposta da IA (NÃO enviada):</b>", "", "✅ Enviar pro cliente"
+        dica = "↩️ <i>Aprove pelo botão (sai em partes, como alguém digitando), ou responda a esta mensagem com o seu texto.</i>"
+    else:
+        cabecalho = f"{_PREFIX}✋ Precisa de você — {_conversa_header(conversa)}\n\n💬 <b>Cliente:</b>\n"
+        titulo_sugestao, botao = "✍️ <b>Sugestão da IA (NÃO enviada):</b>", "✅ Enviar sugestão"
+        aviso = f"\n\n⚠️ <i>A IA não respondeu sozinha: {esc(motivo)}</i>"
+        dica = "↩️ <i>Envie a sugestão pelo botão, ou responda a esta mensagem com o seu texto.</i>"
+    sugestao = ""
+    if rascunho:
+        sugestao = (
+            f"\n\n{titulo_sugestao}\n"
+            f"<code>{telegram_api.truncate_escaped(esc(rascunho), 1600, suffix='…')}</code>"
+        )
+    rodape = f"{aviso}{sugestao}\n\n{_conversa_link(conversa)}\n" + (dica if draft_id else _REPLY_HINT)
+    corpo = _cliente_bloco(mensagens, telegram_api.MSG_LIMIT - len(cabecalho) - len(rodape) - 40)
+    teclado = telegram_api.single_button_keyboard(botao, f"msgsend:{draft_id}") if draft_id else None
+    return telegram_api.send_with_keyboard(cabecalho + corpo + rodape, teclado)
+
+
+def notify_reply_result(conversa: dict, texto: str, success: bool, detail: str, mensagem_id=None) -> int | None:
+    if success:
+        linhas = [
+            f"{_PREFIX}✅ Resposta enviada pra {_conversa_header(conversa)}",
+            "",
+            f"<i>{telegram_api.truncate_escaped(esc(texto), 1500, suffix='…')}</i>",
+            "",
+            _conversa_link(conversa),
+            "↩️ <i>Responda a esta mensagem pra mandar outra.</i>",
+        ]
+    else:
+        linhas = [
+            f"{_PREFIX}❌ Resposta NÃO enviada pra {_conversa_header(conversa)}",
+            f"Motivo: {esc(detail)}",
+            "",
+            "Seu texto:",
+            f"<code>{telegram_api.truncate_escaped(esc(texto), 3000, suffix='…')}</code>",
+            "",
+            _conversa_link(conversa),
+            "↩️ <i>Responda a esta mensagem pra tentar de novo.</i>",
+        ]
+    teclado = delete_keyboard(mensagem_id) if success and mensagem_id else None
+    return telegram_api.send_with_keyboard("\n".join(linhas), teclado)
+
+
+def notify_reply_uncertain(conversa: dict, texto: str) -> int | None:
+    """O bot caiu no meio do envio de uma resposta: não reenvia sozinho (poderia duplicar)."""
+    linhas = [
+        f"{_PREFIX}⚠️ Não sei se a resposta pra {_conversa_header(conversa)} foi enviada",
+        "O bot parou no meio do envio. Confira no site antes de mandar de novo:",
+        "",
+        f"<code>{telegram_api.truncate_escaped(esc(texto), 3000, suffix='…')}</code>",
+        "",
+        _conversa_link(conversa),
+        "↩️ <i>Se não chegou, responda a esta mensagem com o texto de novo.</i>",
+    ]
+    return telegram_api.send_with_keyboard("\n".join(linhas), None)
 
 
 def _propostas_hoje_line(status: str, simulated: bool) -> str:
