@@ -34,6 +34,7 @@ TEXTO_VARIANTE_LABELS = {
     "diagnostico": "diagnóstico (aponta um cuidado)",
     "opcoes": "dois caminhos pro cliente escolher",
     "conversa": "conversa informal",
+    "estruturado": "estruturado (cumprimento → solução → proposta)",
     "template": "template fixo do config.yaml",
 }
 
@@ -251,9 +252,9 @@ def _sortear_variante_texto(proposal_cfg: dict) -> str:
     """Sorteia o estilo do texto pelos pesos de proposal.texto_variantes (default: todos iguais)."""
     pesos = proposal_cfg.get("texto_variantes") or {v: 1 for v in ai_writer.TEXT_VARIANTS}
     validos = {v: p for v, p in pesos.items() if v in ai_writer.TEXT_VARIANTS and p and p > 0}
-    ignorados = set(pesos) - set(validos)
-    if ignorados:
-        log.warning("texto_variantes: ignorando estilo(s) desconhecido(s)/sem peso: %s", ", ".join(sorted(ignorados)))
+    desconhecidos = set(pesos) - set(ai_writer.TEXT_VARIANTS)
+    if desconhecidos:
+        log.warning("texto_variantes: ignorando estilo(s) desconhecido(s): %s", ", ".join(sorted(desconhecidos)))
     if not validos:
         return "padrao"
     return random.choices(list(validos), weights=list(validos.values()))[0]

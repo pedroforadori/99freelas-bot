@@ -65,8 +65,12 @@ proposal:
   ia_provider: "gemini"          # "anthropic" (requer ANTHROPIC_API_KEY) ou "gemini" (requer GEMINI_API_KEY)
   ia_model: "gemini-3.6-flash"   # ajuste conforme o provedor acima
 
-  # Estilo do texto (texto_modo "ia"): sorteado a cada proposta pelos pesos abaixo, pra
-  # descobrir qual converte melhor. Peso 0 (ou remover a linha) tira o estilo do sorteio.
+  # Estilo do texto (texto_modo "ia"): sorteado a cada proposta pelos pesos abaixo. Peso 0
+  # (ou remover a linha) tira o estilo do sorteio. Desde 2026-10-02 só "estruturado" está
+  # ligado — estrutura única: cumprimento → como resolver (interesse + briefing do que será
+  # feito) → a proposta (o que o cliente recebe, disponibilidade, convite pra conversar).
+  # Os outros estilos continuam disponíveis pra reativar/comparar:
+  #   estruturado — cumprimento / solução + briefing / proposta, até ~1300 caracteres
   #   padrao      — estilo original: profissional e direto, até ~1500 caracteres
   #   pergunta    — curto, termina com uma pergunta sobre o projeto
   #   plano       — resumo + 3-4 etapas numeradas + o que o cliente recebe
@@ -79,22 +83,26 @@ proposal:
   # o link do projeto no chat do bot e clique "💬 Respondeu" (ou "🏆 Fechou"); depois rode
   # `python bot/report.py` pra ver as taxas por estilo.
   texto_variantes:
-    padrao: 1
-    pergunta: 1
-    plano: 1
-    minimo: 1
-    resultado: 1
-    diagnostico: 1
-    opcoes: 1
-    conversa: 1
+    estruturado: 1
+    padrao: 0
+    pergunta: 0
+    plano: 0
+    minimo: 0
+    resultado: 0
+    diagnostico: 0
+    opcoes: 0
+    conversa: 0
 
   # Template fixo (usado quando texto_modo == "fixo", ou como fallback se a IA falhar).
   # Variável disponível: {titulo}. NUNCA inclua {oferta}/{prazo_dias} aqui — valor e prazo
   # vão só nos campos próprios do formulário (#oferta/#duracao-estimada), nunca no texto.
+  # Mesma ordem do estilo "estruturado": cumprimento → interesse/solução → proposta.
   texto: |
-    Olá! Tenho experiência relevante com {titulo} e gostaria de me candidatar a este projeto.
+    Olá, tudo bem?
 
-    Fico à disposição para conversarmos sobre os detalhes. Obrigado pela oportunidade!
+    Tenho interesse no projeto "{titulo}" e experiência pra resolver exatamente o que você descreveu, cuidando de cada etapa do começo ao fim, com comunicação clara durante todo o trabalho.
+
+    Posso começar logo e fico à disposição para conversarmos sobre os detalhes e tirar qualquer dúvida. Obrigado pela oportunidade!
 
   # Nota fixa opcional, anexada ao final de QUALQUER texto (IA ou template fixo), sempre
   # do jeito exato escrito aqui — nunca reformulada pela IA. null/"" = não anexa nada.

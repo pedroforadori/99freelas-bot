@@ -99,6 +99,20 @@ _TEXT_VARIANTS = {
         "- Continue respeitoso: sem gírias e sem emojis.\n"
         "- No máximo 800 caracteres.\n"
     ),
+    # Estrutura única pedida pelo usuário (2026-10-02) — padrão via config.yaml
+    # (texto_variantes só com "estruturado"); os outros estilos ficam pra reativar.
+    "estruturado": (
+        "- Escreva EXATAMENTE 3 partes, nesta ordem, separadas por uma linha em branco, SEM "
+        "títulos nem rótulos (nada de 'Parte 1', 'Solução:', 'Proposta:'):\n"
+        "  1. Cumprimento: curto e cordial, numa linha só (ex: 'Olá, tudo bem?'). Use o nome do "
+        "cliente só se ele aparecer na descrição — nunca invente um nome.\n"
+        "  2. Solução: mostre interesse pelo projeto e que entendeu o problema, usando os "
+        "termos da descrição do cliente; em seguida, um briefing do que será feito, em "
+        "linguagem simples (pode usar de 3 a 5 itens curtos começando com '-', quando ajudar a leitura).\n"
+        "  3. Proposta: fecho propondo o trabalho — o que o cliente terá em mãos ao final, "
+        "disponibilidade pra começar e convite pra conversar ou tirar dúvidas. Sem valor e sem prazo.\n"
+        "- Tom profissional e próximo, sem floreios. No máximo 1300 caracteres no total.\n"
+    ),
 }
 TEXT_VARIANTS = tuple(_TEXT_VARIANTS)
 
