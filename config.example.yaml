@@ -26,6 +26,13 @@ budget_min: null
 budget_max: null
 
 proposal:
+  # "manual" (padrão) = o bot NÃO calcula valor/prazo: o projeto chega no Telegram sem valor e,
+  #   se você quiser, responde (reply) à mensagem com "valor prazo" (ex: "1200 10") — isso já
+  #   aprova e envia a proposta. Sem IA de preço e sem esperar a média dos concorrentes.
+  # "automatico" = cálculo pelas opções abaixo (oferta_estrategia, aguardar_media, IA de preço).
+  valor_modo: "manual"
+
+
   # "orcamento_cliente" usa o valor pedido pelo cliente
   # "fixo" usa oferta_fixa abaixo
   # "menor_proposta" lê o valor médio das propostas concorrentes no projeto e oferece
@@ -41,7 +48,7 @@ proposal:
   # ciclo de varredura. Desiste depois de aguardar_media_max_horas (trava de segurança).
   # Com a média de prazo, o prazo proposto fica prazo_desconto_percent% abaixo dela
   # (ex: média 10 dias -> 8 dias). Links colados manualmente no Telegram não esperam.
-  aguardar_media: true
+  aguardar_media: false                      # só vale com valor_modo "automatico"
   aguardar_media_max_horas: 48
   prazo_desconto_percent: 20
 
@@ -117,7 +124,9 @@ mensagens:
   # site". Ela NÃO envia sozinha (manda uma sugestão com "✅ Enviar sugestão") quando o
   # cliente pede desconto/valor/prazo novo, reunião etc., ou quando a resposta citaria valor
   # ou prazo que você ainda não passou na conversa, contato ou link.
-  resposta_automatica: true
+  # Desligada por enquanto (2026-10-02): mensagens de clientes só chegam no Telegram (dá pra
+  # responder por reply).
+  resposta_automatica: false
   # true = modo aprovação: a IA prepara a resposta (com espera, travas e divisão em partes),
   # mas ela SÓ sai quando você clica em "✅ Enviar pro cliente" no Telegram — aí vai em
   # partes, no ritmo de digitação. Deixe true até confiar nas respostas; false = envia sozinha.

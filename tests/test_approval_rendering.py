@@ -36,6 +36,13 @@ CASOS_99 = {
         {"oferta": 500.0, "prazo_dias": 5, "texto": "Texto antigo", "full_description": None},
     ),
     "descricao_longa_truncada": (project_99(), proposal_99(full_description="x" * 5000)),
+    # proposal.valor_modo "manual": chega sem valor, o usuário responde com "valor prazo"
+    "valor_manual_aguardando": (
+        project_99(),
+        proposal_99(origem_valor="manual", oferta=None, prazo_dias=None, media_concorrentes=None, media_prazo=None),
+    ),
+    "valor_manual_aguardando_com_media": (project_99(), proposal_99(origem_valor="manual", oferta=None, prazo_dias=None)),
+    "valor_manual_informado": (project_99(), proposal_99(origem_valor="manual", oferta=900.0, prazo_dias=6)),
 }
 
 

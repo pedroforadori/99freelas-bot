@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from bot import ai_writer, approvals, connections, manual_queue, messages, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
+from bot.proposal import describe_valor, valor_manual
 from bot.sources.base import Callback, CallbackRoute, EditableField, JobSource
 from bot.sources.freelas99 import auth, views
 from bot.storage import already_applied, register_application
@@ -51,6 +52,29 @@ def _apply_prazo(proposal: dict, valor: int) -> str:
     proposal["prazo_dias"] = valor
     proposal["ajustado_manualmente"] = True
     return f"Prazo atualizado: {valor} dias"
+
+
+def _parse_valor_prazo(raw: str) -> tuple[float, int] | None:
+    """
+    Resposta "valor prazo" a um pedido de valor manual: "1200 10", "1200, 10",
+    "R$ 1.200,50 10 dias", "1200 / 10d". O prazo é o último número; o valor, tudo antes dele.
+    None se faltar algum dos dois ou estiver fora do aceitável.
+    """
+    texto = (raw or "").strip()
+    match = re.match(r"^(.*?\d.*?)[\s,;/]+(\d+)\s*(?:d|dia|dias)?\.?\s*$", texto, re.IGNORECASE)
+    if not match:
+        return None
+    oferta = _parse_oferta(match.group(1).strip(" ,;/"))
+    prazo = _parse_prazo(match.group(2))
+    if not oferta or prazo is None:
+        return None
+    return oferta, prazo
+
+
+_VALOR_PRAZO_INVALIDO = (
+    "Não entendi. Responda à mensagem do projeto com o valor e o prazo em dias, "
+    "ex: <code>1200 10</code> (R$ 1.200,00 em 10 dias)."
+)
 
 
 OFERTA = EditableField(
@@ -127,7 +151,8 @@ class Freelas99Source(JobSource):
         # contador "Conexões usadas: X/Y" das notificações (views._conexoes_usadas_line).
         connections.refresh(self.page)
 
-        aguardar_media = config.get("proposal", {}).get("aguardar_media", False)
+        # Com valor manual (proposal.valor_modo) não há o que esperar: o usuário define o preço.
+        aguardar_media = config.get("proposal", {}).get("aguardar_media", False) and not valor_manual(config)
         if aguardar_media:
             self._recheck_awaiting_average(config)
 
@@ -182,8 +207,8 @@ class Freelas99Source(JobSource):
         self.queue_for_approval(project, proposal)
         register_application(project["id"], project["title"], status="pending_approval", detail=detail)
         log.info(
-            "Aguardando aprovação: '%s' — oferta=R$%s, prazo=%sd, texto=%s",
-            project["title"], proposal["oferta"], proposal["prazo_dias"], proposal.get("texto_variante"),
+            "Aguardando aprovação: '%s' — %s, texto=%s",
+            project["title"], describe_valor(proposal), proposal.get("texto_variante"),
         )
 
     def _recheck_awaiting_average(self, config: dict) -> None:
@@ -341,6 +366,7 @@ class Freelas99Source(JobSource):
             self.edit_buttons(project["id"]),
             proposal.get("texto_ia_falhou", False),
             proposal.get("promovida", False),
+            valor_manual=proposal.get("origem_valor") == "manual",
         )
         return views.approval_text(project, proposal), keyboard
 
@@ -545,7 +571,7 @@ class Freelas99Source(JobSource):
         textos += [e["url"] for e in message.get("entities", []) + message.get("caption_entities", []) if e.get("url")]
         matches = {m.group(2): m.group(1) for texto in textos for m in views.PROJECT_LINK_REGEX.finditer(texto)}
         if not matches:
-            return False
+            return self._on_valor_solto(textos[0])
 
         for project_id, slug in matches.items():
             views.send_link_menu(project_id, views.project_url(slug))
@@ -562,6 +588,8 @@ class Freelas99Source(JobSource):
             return False
         texto = (message.get("text") or "").strip()
         reply_to = message["reply_to_message"]["message_id"]
+        if self._on_valor_reply(reply_to, texto):
+            return True
         if not texto:
             if messages.find_thread(reply_to) is None:
                 return False
@@ -571,6 +599,63 @@ class Freelas99Source(JobSource):
         if conversa is None:
             return False
         log.info("Resposta pra %s (conversa %s) enfileirada.", conversa["cliente"], conversa["id"])
+        return True
+
+    def _on_valor_solto(self, texto: str) -> bool:
+        """
+        "valor prazo" mandado como mensagem solta, sem reply: não dá pra saber de qual
+        projeto é — explica que precisa responder à mensagem do projeto, em vez de ignorar
+        em silêncio (caso real, 2026-10-02: "300 5" solto e nada aconteceu).
+        """
+        if _parse_valor_prazo(texto) is None:
+            return False
+        aguardando = [
+            e for e in approvals.get_open()
+            if e["decision"] is None and e["project"].get("source", self.name) == self.name
+            and views.aguardando_valor(e["proposal"])
+        ]
+        if not aguardando:
+            return False
+        telegram_api.send_message(
+            f"{self.tag} Não enviei: pra saber de qual projeto é, <b>responda (reply) à mensagem "
+            "do projeto</b> com o valor e o prazo — segure a mensagem (ou deslize pro lado) e "
+            "toque em <i>Responder</i>."
+        )
+        return True
+
+    def _on_valor_reply(self, reply_to: int, texto: str) -> bool:
+        """
+        Reply "valor prazo" a um pedido de aprovação com valor manual (proposal.valor_modo):
+        grava oferta/prazo + "approved" de uma vez (approvals.approve_with_proposal, em disco
+        antes de tudo, mesma garantia do clique em ✅) e o próximo tick envia
+        (process_pending_approvals → resolve_approval → deliver). False = não é reply a um
+        pedido desses (segue pro fluxo de mensagens de clientes).
+        """
+        project_id = approvals.find_by_message_id(reply_to)
+        if project_id is None:
+            return False
+        entry = approvals.get_pending(project_id)
+        if entry is None or entry["project"].get("source", self.name) != self.name:
+            return False
+        if entry["proposal"].get("origem_valor") != "manual":
+            return False
+        if entry["decision"] is not None:
+            telegram_api.send_message(f"{self.tag} Essa proposta já foi decidida — resposta ignorada.")
+            return True
+
+        valores = _parse_valor_prazo(texto)
+        if valores is None:
+            telegram_api.send_message(f"{self.tag} {_VALOR_PRAZO_INVALIDO}")
+            return True
+        oferta, prazo = valores
+        proposal = dict(entry["proposal"], oferta=oferta, prazo_dias=prazo)
+        if not approvals.approve_with_proposal(project_id, proposal):
+            telegram_api.send_message(f"{self.tag} Essa proposta já foi decidida — resposta ignorada.")
+            return True
+
+        text, _ = self.render_approval(entry["project"], proposal)
+        telegram_api.edit_text(reply_to, text, telegram_api.static_label_keyboard("⏳ Processando..."))
+        log.info("Valor manual informado pra '%s': R$%s em %sd — enviando.", entry["project"].get("title"), oferta, prazo)
         return True
 
     def _on_link_action(self, cb: Callback) -> None:

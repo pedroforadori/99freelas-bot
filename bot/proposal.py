@@ -21,7 +21,25 @@ ORIGEM_LABELS = {
     "orcamento_cliente": "💰 Baseado no orçamento do cliente",
     "fixo": "📌 Valor fixo configurado",
     "media_arredondada": "📊 Média das propostas concorrentes, arredondada pra baixo",
+    "manual": "✍️ Definido por você no Telegram",
 }
+
+
+def valor_manual(config: dict) -> bool:
+    """
+    proposal.valor_modo == "manual" (default, 2026-10-02): o bot não calcula oferta/prazo —
+    o pedido de aprovação chega sem valor e o usuário responde no Telegram com "valor prazo",
+    o que já aprova e envia (ver Freelas99Source.handle_reply). "automatico" = cálculo antigo
+    (média dos concorrentes / IA / fixo).
+    """
+    return (config.get("proposal") or {}).get("valor_modo", "manual") != "automatico"
+
+
+def describe_valor(proposal: dict) -> str:
+    """Oferta/prazo pro log — no modo manual eles só chegam no reply do Telegram."""
+    if proposal.get("oferta") is None:
+        return "valor/prazo a definir no Telegram"
+    return f"oferta=R${proposal['oferta']}, prazo={proposal.get('prazo_dias')}d"
 
 # Estilo do texto (ver ai_writer._TEXT_VARIANTS), exibido no Telegram e gravado em
 # applied_jobs.json pra comparar os estilos depois (ver bot/report.py).
@@ -96,7 +114,7 @@ def _build_texto(
     template = proposal_cfg.get("texto", "Olá! Tenho interesse em {titulo}.")
     texto = template.format(
         titulo=project.get("title", ""),
-        oferta=format_currency_br(oferta),
+        oferta=format_currency_br(oferta) if oferta is not None else "",
         prazo_dias=prazo_dias,
     )
     return texto, texto_ia_falhou, "template"
@@ -167,7 +185,11 @@ def build_proposal(
     orcamento_cliente = budget or proposal_cfg.get("oferta_fixa") or 0
     prazo_dias = proposal_cfg.get("prazo_dias", 7)
 
-    if estrategia == "menor_proposta" and lowest_bid:
+    if valor_manual(config):
+        # Valor e prazo digitados pelo usuário no Telegram — sem IA de preço (preparo mais
+        # rápido). A média dos concorrentes, se houver, só aparece como referência.
+        oferta, prazo_dias, origem = None, None, "manual"
+    elif estrategia == "menor_proposta" and lowest_bid:
         # Média das propostas concorrentes arredondada pra baixo (1230 -> 1200) — decisão do
         # usuário (2026-09-25), no lugar do antigo undercut_percent% abaixo da média.
         oferta = _arredondar_para_baixo(lowest_bid)
@@ -197,7 +219,7 @@ def build_proposal(
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
 
-    if media_prazo:
+    if media_prazo and origem != "manual":
         prazo_dias = _prazo_abaixo_da_media(media_prazo, proposal_cfg)
 
     texto, texto_ia_falhou, texto_variante = _build_texto(project, config, oferta, prazo_dias, full_description)
@@ -225,8 +247,8 @@ def build_proposal(
         resultado["oferta_sugerida_ia"] = oferta_sugerida_ia
 
     log.info(
-        "Proposta montada para '%s': oferta=R$%s, prazo=%sd, origem=%s, texto=%s%s",
-        project.get("title"), oferta, prazo_dias, origem, texto_variante,
+        "Proposta montada para '%s': %s, origem=%s, texto=%s%s",
+        project.get("title"), describe_valor(resultado), origem, texto_variante,
         f" (IA sugeriu R${oferta_sugerida_ia})" if "oferta_sugerida_ia" in resultado else "",
     )
 

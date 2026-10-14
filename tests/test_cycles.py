@@ -89,7 +89,7 @@ def test_run_cycle_limite_por_ciclo(api, site):
 def test_run_cycle_aguardando_media(api, site):
     site["projects"] = [project_99()]
     site["prepare"] = lambda project: (None, submitter.AGUARDANDO_MEDIA)
-    api.run_cycle({"proposal": {"aguardar_media": True}})
+    api.run_cycle({"proposal": {"valor_modo": "automatico", "aguardar_media": True}})
     rec = storage.get_application(PID)
     assert rec["status"] == "awaiting_average"
     assert rec["project"]["id"] == PID
@@ -101,7 +101,7 @@ def test_recheck_media_apareceu(api, site):
         PID, "t", status="awaiting_average", detail="x",
         extra={"project": project_99(), "aguardando_desde": datetime.utcnow().isoformat()},
     )
-    api.run_cycle({"proposal": {"aguardar_media": True}})
+    api.run_cycle({"proposal": {"valor_modo": "automatico", "aguardar_media": True}})
     assert site["prepare_calls"] == [(PID, True)]
     assert storage.get_application(PID)["status"] == "pending_approval"
     assert approvals.get_pending(PID) is not None
@@ -112,7 +112,7 @@ def test_recheck_media_desiste_apos_limite(api, site):
         PID, "t", status="awaiting_average", detail="x",
         extra={"project": project_99(), "aguardando_desde": (datetime.utcnow() - timedelta(hours=50)).isoformat()},
     )
-    api.run_cycle({"proposal": {"aguardar_media": True, "aguardar_media_max_horas": 48}})
+    api.run_cycle({"proposal": {"valor_modo": "automatico", "aguardar_media": True, "aguardar_media_max_horas": 48}})
     assert site["prepare_calls"] == []
     assert storage.get_application(PID)["status"] == "failed"
 
@@ -123,7 +123,7 @@ def test_recheck_projeto_fechou(api, telegram, site):
         extra={"project": project_99(), "aguardando_desde": datetime.utcnow().isoformat()},
     )
     site["prepare"] = lambda project: (None, "projeto foi fechado")
-    api.run_cycle({"proposal": {"aguardar_media": True}})
+    api.run_cycle({"proposal": {"valor_modo": "automatico", "aguardar_media": True}})
     assert storage.get_application(PID)["status"] == "failed"
     assert any("Parou de aguardar" in p["text"] for p in telegram.of("sendMessage"))
 

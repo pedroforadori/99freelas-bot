@@ -5,7 +5,7 @@ from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as 
 from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot.logger_setup import get_logger
-from bot.proposal import build_proposal
+from bot.proposal import build_proposal, valor_manual
 from bot.utils import format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -152,6 +152,9 @@ def prepare_proposal(
     concorrentes, retorna (None, AGUARDANDO_MEDIA) ANTES de chamar qualquer IA — usado pela
     varredura com proposal.aguardar_media (ver Freelas99Source.run_cycle).
     """
+    if valor_manual(config):
+        # Valor/prazo digitados pelo usuário no Telegram: nada a esperar.
+        require_average = False
     page.goto(project["url"], wait_until="networkidle")
 
     # Projeto enviado manualmente por link (Freelas99Source.process_manual_projects) chega sem título —
@@ -268,7 +271,11 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
 
     dry_run: se True, preenche os campos mas NUNCA clica no botão final de envio — usado
     por bot/dry_run.py (via submit_proposal) pra validar o pipeline sem gastar conexão.
+    Sem oferta/prazo (proposal.valor_modo "manual" e o usuário ainda não respondeu com o
+    valor), nunca envia de verdade; em dry_run preenche só o texto.
     """
+    if not dry_run and (proposal.get("oferta") is None or proposal.get("prazo_dias") is None):
+        return _finish(project, proposal, False, "valor/prazo não informados — responda à mensagem com o valor e o prazo")
     page.goto(project["url"], wait_until="networkidle")
 
     if page.query_selector(sel.PROPOSAL_ALREADY_SENT_MARKER):
@@ -305,8 +312,9 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         )
 
     try:
-        page.fill(sel.PROPOSAL_OFERTA_INPUT, format_currency_br(proposal["oferta"]))
-        page.fill(sel.PROPOSAL_PRAZO_INPUT, str(proposal["prazo_dias"]))
+        if proposal.get("oferta") is not None and proposal.get("prazo_dias") is not None:
+            page.fill(sel.PROPOSAL_OFERTA_INPUT, format_currency_br(proposal["oferta"]))
+            page.fill(sel.PROPOSAL_PRAZO_INPUT, str(proposal["prazo_dias"]))
         page.fill(sel.PROPOSAL_DETALHES_TEXTAREA, proposal["texto"])
         aviso_promocao = ""
         if proposal.get("promovida"):

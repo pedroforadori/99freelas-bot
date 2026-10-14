@@ -127,6 +127,35 @@ def record_decision(project_id: str, action: str) -> bool:
         return True
 
 
+def find_by_message_id(message_id: int) -> str | None:
+    """project_id da entrada cuja mensagem de aprovação no Telegram é `message_id`."""
+    with _LOCK:
+        data = _load()
+        for pid, entry in data.items():
+            if entry.get("telegram_message_id") == message_id:
+                return pid
+        return None
+
+
+def approve_with_proposal(project_id: str, proposal: dict) -> bool:
+    """
+    Grava a proposta (com o valor/prazo digitados pelo usuário) E a decisão "approved" no
+    mesmo lock — reply "valor prazo" a um pedido de valor manual (ver
+    Freelas99Source.handle_reply). Mesma proteção de update_proposal: False se a entrada não
+    existir ou já tiver decisão gravada.
+    """
+    with _LOCK:
+        data = _load()
+        entry = data.get(project_id)
+        if entry is None or entry["decision"] is not None:
+            return False
+        entry["proposal"] = proposal
+        entry["decision"] = "approved"
+        entry["decided_at"] = datetime.utcnow().isoformat()
+        _save(data)
+        return True
+
+
 def get_pending(project_id: str) -> dict | None:
     with _LOCK:
         data = _load()

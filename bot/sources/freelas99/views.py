@@ -258,6 +258,11 @@ def _conexoes_usadas_line(status: str, simulated: bool) -> str | None:
     return f"<b>Conexões usadas:</b> {usadas}/{total}"
 
 
+def aguardando_valor(proposal: dict) -> bool:
+    """Proposta de valor manual (proposal.valor_modo) que ainda espera o "valor prazo" do usuário."""
+    return proposal.get("origem_valor") == "manual" and proposal.get("oferta") is None
+
+
 def _origem_line(proposal: dict) -> str | None:
     """
     Monta a linha mostrando de onde veio o valor/prazo da proposta (IA, média de
@@ -270,6 +275,13 @@ def _origem_line(proposal: dict) -> str | None:
     origem = proposal.get("origem_valor")
     if not origem:
         return None
+    media = proposal.get("media_concorrentes")
+    if aguardando_valor(proposal):
+        if not media:
+            return None
+        media_prazo = proposal.get("media_prazo")
+        prazo_txt = f" · {media_prazo} dias" if media_prazo else ""
+        return f"<b>Média das propostas concorrentes:</b> R$ {format_currency_br(media)}{prazo_txt}"
     label = ORIGEM_LABELS.get(origem, origem)
     if proposal.get("ajustado_manualmente"):
         label += " · ajustado manualmente"
@@ -318,8 +330,10 @@ def notify_proposal_result(
         f"<b>Link:</b> {esc(project.get('url', ''))}",
     ]
     if proposal:
-        linhas.append(f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}")
-        linhas.append(f"<b>Prazo:</b> {proposal['prazo_dias']} dias")
+        if proposal.get("oferta") is not None:
+            linhas.append(f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}")
+        if proposal.get("prazo_dias") is not None:
+            linhas.append(f"<b>Prazo:</b> {proposal['prazo_dias']} dias")
         if proposal.get("promovida"):
             linhas.append("⭐ <b>Promovida</b>")
         origem_line = _origem_line(proposal)
@@ -350,7 +364,13 @@ def approval_text(project: dict, proposal: dict) -> str:
         f"<b>Projeto:</b> {esc(project.get('title', ''))}\n"
         f"<b>Link:</b> {esc(project.get('url', ''))}\n"
     )
-    valores = f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}\n<b>Prazo:</b> {proposal['prazo_dias']} dias\n"
+    if aguardando_valor(proposal):
+        valores = (
+            "💬 <b>Responda a esta mensagem com valor e prazo pra enviar</b> — "
+            "ex: <code>1200 10</code> (R$ 1.200,00, 10 dias)\n"
+        )
+    else:
+        valores = f"<b>Oferta:</b> R$ {format_currency_br(proposal['oferta'])}\n<b>Prazo:</b> {proposal['prazo_dias']} dias\n"
     origem_line = _origem_line(proposal)
     if origem_line:
         valores += f"{origem_line}\n"
@@ -390,23 +410,31 @@ def approval_text(project: dict, proposal: dict) -> str:
 
 
 def approval_keyboard(
-    project_id: str, edit_buttons: list[dict], texto_ia_falhou: bool = False, promovida: bool = False
+    project_id: str,
+    edit_buttons: list[dict],
+    texto_ia_falhou: bool = False,
+    promovida: bool = False,
+    valor_manual: bool = False,
 ) -> dict:
     """
     Teclado da mensagem de aprovação: a linha de edição (JobSource.edit_buttons),
     opcionalmente "🔄 Tentar gerar via IA novamente" (só quando proposal["texto_ia_falhou"]
     — ver proposal._build_texto), o botão que liga/desliga a proposta promovida
     (checkbox #highlight-bid do site, marcado no envio) e a linha final de decisão.
+
+    valor_manual: proposta sem valor (proposal.valor_modo "manual") — sem edição e sem
+    "✅ Aprovar": aprovar é responder à mensagem com "valor prazo"; só sobra "❌ Rejeitar".
     """
-    keyboard = [edit_buttons]
+    keyboard = [] if valor_manual else [edit_buttons]
     if texto_ia_falhou:
         keyboard.append([{"text": "🔄 Tentar gerar texto via IA novamente", "callback_data": f"retryia:{project_id}"}])
     promo_label = "⭐ Promovida: SIM (clique pra desligar)" if promovida else "☆ Enviar como promovida"
     keyboard.append([{"text": promo_label, "callback_data": f"promo:{project_id}"}])
-    keyboard.append([
-        {"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"},
-        {"text": "❌ Rejeitar", "callback_data": f"reject:{project_id}"},
-    ])
+    rejeitar = {"text": "❌ Rejeitar", "callback_data": f"reject:{project_id}"}
+    if valor_manual:
+        keyboard.append([rejeitar])
+    else:
+        keyboard.append([{"text": "✅ Aprovar", "callback_data": f"approve:{project_id}"}, rejeitar])
     return {"inline_keyboard": keyboard}
 
 
