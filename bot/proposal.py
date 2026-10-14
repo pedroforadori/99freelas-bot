@@ -121,6 +121,22 @@ def _build_texto(
     return texto, texto_ia_falhou, "template"
 
 
+# O 99Freelas troca por "?" o que não existe em Latin-1 (visto numa proposta real: o "—" da
+# nota_extra virou "?"). Pontuação tipográfica (comum no texto da IA) vira o equivalente
+# simples; o que sobrar fora do Latin-1 (emoji etc.) é removido. Acentos ficam.
+_TROCAS_LATIN1 = str.maketrans({
+    "—": "-", "–": "-", "‒": "-", "‐": "-", "‑": "-", "−": "-",
+    "‘": "'", "’": "'", "‚": "'", "′": "'",
+    "“": '"', "”": '"', "„": '"',
+    "…": "...", "•": "-", " ": " ", " ": " ", " ": " ",
+})
+
+
+def normalizar_para_o_site(texto: str) -> str:
+    texto = texto.translate(_TROCAS_LATIN1)
+    return texto.encode("latin-1", errors="ignore").decode("latin-1")
+
+
 def _finalizar_texto(texto: str, project: dict, proposal_cfg: dict) -> tuple[str, bool]:
     """
     Anexa a nota_extra e roda a checagem final de segurança. Retorna (texto, substituido)
@@ -139,6 +155,7 @@ def _finalizar_texto(texto: str, project: dict, proposal_cfg: dict) -> tuple[str
     # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
     # essa é a rede de segurança que garante que nem um template mal configurado consiga
     # colocar contato/valor/prazo dentro do texto da proposta).
+    texto = normalizar_para_o_site(texto)
     violation = ai_writer.check_text_safety(texto)
     if violation:
         log.warning(

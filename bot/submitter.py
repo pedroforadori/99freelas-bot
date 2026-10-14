@@ -6,7 +6,7 @@ from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot.filter import excluded_keyword
 from bot.logger_setup import get_logger
-from bot.proposal import build_proposal, valor_manual
+from bot.proposal import build_proposal, normalizar_para_o_site, valor_manual
 from bot.utils import format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -329,7 +329,7 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
         if proposal.get("oferta") is not None and proposal.get("prazo_dias") is not None:
             page.fill(sel.PROPOSAL_OFERTA_INPUT, format_currency_br(proposal["oferta"]))
             page.fill(sel.PROPOSAL_PRAZO_INPUT, str(proposal["prazo_dias"]))
-        page.fill(sel.PROPOSAL_DETALHES_TEXTAREA, proposal["texto"])
+        page.fill(sel.PROPOSAL_DETALHES_TEXTAREA, normalizar_para_o_site(proposal["texto"]))
         aviso_promocao = ""
         if proposal.get("promovida"):
             if not _set_highlight(page, True):

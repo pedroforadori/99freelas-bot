@@ -216,3 +216,18 @@ def test_prompt_de_preco_leva_a_media():
     prompt = ai_writer._build_price_user_prompt({"title": "Site"}, "desc", 1234.5, 10)
     assert "R$ 1234.50" in prompt and "10 dias" in prompt
     assert "Sem orçamento" in ai_writer._build_price_user_prompt({"title": "Site"}, "desc")
+
+
+# --- caracteres que o site troca por "?" ----------------------------------------------------
+
+
+def test_normaliza_pontuacao_tipografica():
+    texto = "Já tenho projetos — confira “aqui”… ‘ok’ 🚀 ação"
+    assert proposal_mod.normalizar_para_o_site(texto) == "Já tenho projetos - confira \"aqui\"... 'ok'  ação"
+
+
+def test_nota_extra_sai_normalizada(ia_preco):
+    config = _config()
+    config["proposal"]["nota_extra"] = "Tenho portfólio — confira."
+    p = proposal_mod.build_proposal(project_99(), config, full_description="desc")
+    assert p["texto"].endswith("Tenho portfólio - confira.")
