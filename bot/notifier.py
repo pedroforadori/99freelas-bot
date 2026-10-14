@@ -65,7 +65,9 @@ class TelegramErrorHandler(logging.Handler):
             self._recent[key] = now
             emoji = "🔴" if record.levelno >= logging.ERROR else "⚠️"
             self._sending = True
-            notify_activity(f"{emoji} <b>{record.levelname}</b> em <code>{esc(record.name)}</code>\n{esc(msg)[:3500]}")
+            # Direto pro transporte, não por notify_activity: erro continua chegando mesmo com
+            # ACTIVITY_LOG_TELEGRAM=false (o usuário quer só resultados e erros).
+            telegram_api.send_message(f"{emoji} <b>{record.levelname}</b> em <code>{esc(record.name)}</code>\n{esc(msg)[:3500]}")
         except Exception:
             pass
         finally:

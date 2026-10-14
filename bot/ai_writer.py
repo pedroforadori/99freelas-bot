@@ -126,14 +126,15 @@ def _text_system_prompt(variante: str) -> str:
 _SYSTEM_PROMPT = _text_system_prompt("padrao")
 
 _PRICE_SYSTEM_PROMPT = (
-    "Você sugere valor e prazo de proposta para projetos de freelancer no 99Freelas, em "
-    "português do Brasil. Contexto: não há dado de mercado disponível pra esse projeto "
-    "(nem orçamento do cliente, nem propostas concorrentes já enviadas), então a sugestão "
-    "precisa vir só da sua leitura da descrição do projeto.\n"
+    "Você elabora valor e prazo de proposta para projetos de freelancer no 99Freelas, em "
+    "português do Brasil, a partir da descrição do projeto. Às vezes recebe também a média "
+    "de valor/prazo das propostas concorrentes já enviadas — quando vier, use como "
+    "referência de mercado; quando não vier, a sugestão precisa vir só da sua leitura do escopo.\n"
     "Regras OBRIGATÓRIAS:\n"
-    "- O objetivo é MAXIMIZAR a chance de aceitação — sugira um valor BAIXO e competitivo "
-    "pro escopo descrito, não um 'valor justo de mercado'. Prazo agressivo mas realista "
-    "(rapidez também ajuda a converter).\n"
+    "- O objetivo é MAXIMIZAR a chance de aceitação — no 99Freelas o cliente costuma fechar "
+    "com o freelancer mais barato. Sugira um valor BAIXO e competitivo pro escopo descrito, "
+    "não um 'valor justo de mercado'. Com média de concorrentes, fique ABAIXO dela. Prazo "
+    "agressivo mas realista (rapidez também ajuda a converter).\n"
     "- Calibre pela complexidade real do escopo descrito — um projeto simples merece um "
     "valor claramente menor que um projeto grande, mesmo mirando baixo em ambos os casos.\n"
     "- Responda APENAS com um objeto JSON válido, sem markdown, sem explicação, no formato "
@@ -285,18 +286,36 @@ _PRAZO_MIN_SANITY = 1
 _PRAZO_MAX_SANITY = 90
 
 
-def _build_price_user_prompt(project: dict, full_description: str) -> str:
+def _build_price_user_prompt(
+    project: dict, full_description: str, lowest_bid: float | None = None, media_prazo: int | None = None
+) -> str:
+    mercado = ""
+    if lowest_bid:
+        mercado += f"Valor médio das propostas concorrentes: R$ {lowest_bid:.2f}\n"
+    if media_prazo:
+        mercado += f"Prazo médio das propostas concorrentes: {media_prazo} dias\n"
+    if not mercado:
+        mercado = "Sem orçamento do cliente e sem propostas concorrentes pra comparar.\n"
     return (
         f"Projeto: {project.get('title', '')}\n\n"
         f"Descrição completa do projeto:\n{full_description}\n\n"
+        f"{mercado}\n"
         "Sugira oferta (R$) e prazo_dias seguindo todas as regras do system prompt."
     )
 
 
-def suggest_price_and_deadline(project: dict, full_description: str, config: dict) -> tuple[float, int] | None:
+def suggest_price_and_deadline(
+    project: dict,
+    full_description: str,
+    config: dict,
+    lowest_bid: float | None = None,
+    media_prazo: int | None = None,
+) -> tuple[float, int] | None:
     """
-    Sugere (oferta, prazo_dias) via IA quando não há orçamento do cliente nem "menor
-    proposta"/média disponível pra basear o preço — ver proposal.build_proposal.
+    Sugere (oferta, prazo_dias) via IA a partir do escopo do projeto — ver
+    proposal.build_proposal. lowest_bid/media_prazo (média de valor/prazo das propostas
+    concorrentes, quando o site já mostra) vão no prompt como referência de mercado
+    (estratégia "ia"); sem eles, a IA julga só pela descrição.
 
     Retorna None se a API falhar, a resposta não for um JSON válido no formato esperado,
     ou os valores caírem fora de uma faixa de sanidade ampla (não é um "piso de mercado",
@@ -313,7 +332,7 @@ def suggest_price_and_deadline(project: dict, full_description: str, config: dic
 
     generate_fn, default_model = provider
     model = proposal_cfg.get("ia_model", default_model)
-    user_prompt = _build_price_user_prompt(project, full_description)
+    user_prompt = _build_price_user_prompt(project, full_description, lowest_bid, media_prazo)
 
     raw = generate_fn(user_prompt, model, system_prompt=_PRICE_SYSTEM_PROMPT)
     if not raw:

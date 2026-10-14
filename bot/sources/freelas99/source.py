@@ -104,6 +104,32 @@ def _approval_extra(proposal: dict) -> dict:
     return {c: proposal[c] for c in campos if proposal.get(c) is not None}
 
 
+def _auto_cfg(config: dict) -> dict:
+    return (config.get("proposal") or {}).get("envio_automatico") or {}
+
+
+def _bloqueio_envio_automatico(proposal: dict, config: dict) -> str | None:
+    """
+    Motivo pra NÃO enviar sozinha uma proposta montada na varredura
+    (proposal.envio_automatico.ativo, pedido do usuário em 2026-10-14), ou None se pode.
+    Na dúvida, não envia: um envio errado gasta conexão e chega no cliente.
+    """
+    oferta, prazo = proposal.get("oferta"), proposal.get("prazo_dias")
+    if not oferta or oferta <= 0 or not prazo:
+        return "proposta sem valor/prazo"
+    if proposal.get("texto_ia_falhou") or proposal.get("texto_variante") == "template":
+        return "a IA não gerou o texto (ficou o template fixo)"
+    maximo = _auto_cfg(config).get("oferta_maxima")
+    if maximo is not None and oferta > maximo:
+        return f"oferta de R$ {format_currency_br(oferta)} acima do máximo de R$ {format_currency_br(maximo)}"
+    return None
+
+
+def _limite_automatico_atingido(config: dict) -> bool:
+    cfg = _auto_cfg(config)
+    return bool(cfg.get("ativo") and cfg.get("respeitar_limite_diario", True) and views._limite_diario_atingido())
+
+
 def _pausa_entre_preparos(proposal: dict, minimo: float, maximo: float) -> float:
     """
     Pausa depois de pedir aprovação, antes do próximo preparo do mesmo ciclo. Com proposta
@@ -172,6 +198,13 @@ class Freelas99Source(JobSource):
                 register_application(project["id"], project["title"], status="skipped_duplicate", detail=reason)
                 continue
 
+            if _limite_automatico_atingido(config):
+                # Envio automático respeita o ritmo diário (MONTHLY_PROPOSAL_QUOTA / dias do
+                # mês) pra não gastar as conexões do mês de uma vez. Sem registrar: o que
+                # sobrou é reavaliado no próximo ciclo (amanhã, se ainda estiver na idade).
+                log.info("Limite diário de envios automáticos atingido — varredura parada até amanhã.")
+                break
+
             if queued_count >= self.MAX_QUEUED_PER_CYCLE:
                 log.info(
                     "Limite de %d pedidos de aprovação por ciclo atingido, '%s' fica pro próximo ciclo.",
@@ -180,7 +213,14 @@ class Freelas99Source(JobSource):
                 )
                 continue
 
-            proposal, reason = submitter.prepare_proposal(self.page, project, config, require_average=aguardar_media)
+            proposal, reason = submitter.prepare_proposal(
+                self.page, project, config, require_average=aguardar_media, check_exclude=True
+            )
+            if reason.startswith(submitter.EXCLUIDO_PELO_FILTRO):
+                log.info("Ignorado: '%s' — %s", project["title"], reason)
+                self.notify(f"🚫 Ignorado: {esc(project['title'])}\n{esc(reason)}")
+                register_application(project["id"], project["title"], status="skipped_duplicate", detail=reason)
+                continue
             if reason == submitter.AGUARDANDO_MEDIA:
                 # Ainda sem média de concorrentes — espera juntar propostas antes de montar
                 # (preço competitivo). _recheck_awaiting_average checa de novo a cada ciclo.
@@ -197,7 +237,20 @@ class Freelas99Source(JobSource):
                 views.notify_proposal_result(project, None, "failed", reason)
                 continue
 
-            self._queue(project, proposal, detail="aguardando aprovação no Telegram")
+            if _auto_cfg(config).get("ativo"):
+                bloqueio = _bloqueio_envio_automatico(proposal, config)
+                if bloqueio:
+                    # Só resultado chega no Telegram (pedido do usuário): o que não pode ir
+                    # sozinho vira falha, com "🔄 Tentar de novo" (prepara de novo e aí pede
+                    # aprovação, como um link colado).
+                    detalhe = f"não enviada automaticamente: {bloqueio}"
+                    log.info("'%s' — %s", project["title"], detalhe)
+                    register_application(project["id"], project["title"], status="failed", detail=detalhe)
+                    views.notify_proposal_result(project, proposal, "failed", detalhe)
+                else:
+                    self._send_automatically(project, proposal, config)
+            else:
+                self._queue(project, proposal, detail="aguardando aprovação no Telegram")
             queued_count += 1
 
             # delay curto entre preparos dentro do mesmo ciclo, pra não parecer um robô disparando em rajada
@@ -210,6 +263,31 @@ class Freelas99Source(JobSource):
             "Aguardando aprovação: '%s' — %s, texto=%s",
             project["title"], describe_valor(proposal), proposal.get("texto_variante"),
         )
+
+    def _send_automatically(self, project: dict, proposal: dict, config: dict) -> None:
+        """
+        Envio sem aprovação (proposal.envio_automatico): passa pelo MESMO portão de approvals
+        — enfileira, grava "approved" em disco e resolve na hora, com a Page da varredura.
+        Se o processo cair (ou o envio der exceção) no meio, a decisão já está gravada e o
+        próximo tick termina o envio; falha de envio fica com "🔄 Tentar de novo" como sempre.
+        """
+        project["source"] = self.name
+        proposal["envio_automatico"] = True
+        proposal["promovida"] = bool(proposal.get("promovida") and _auto_cfg(config).get("promover"))
+        # Sem mensagem de aprovação (message_id None): no Telegram só chega o resultado,
+        # pela notificação de submitter._finish (✅ enviada / ⚠️ falha com "Tentar de novo").
+        approvals.add_pending(project, proposal, None)
+        register_application(project["id"], project["title"], status="pending_approval", detail="envio automático")
+        log.info("Envio automático: '%s' — %s", project["title"], describe_valor(proposal))
+        approvals.record_decision(project["id"], "approved")
+        entry = approvals.get_pending(project["id"])
+        if entry is None:
+            return
+        entry = {"project_id": project["id"], **entry}
+        try:
+            self.resolve_approval(entry)
+        except Exception as e:
+            log.exception("Erro no envio automático de '%s' (tenta de novo no próximo tick): %s", project["title"], e)
 
     def _recheck_awaiting_average(self, config: dict) -> None:
         """

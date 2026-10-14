@@ -17,6 +17,9 @@ keywords_include: []
 
 # Se a vaga contiver QUALQUER uma destas palavras, ela é descartada mesmo que bata em keywords_include.
 # Exemplo: ["wordpress", "php legado", "sem remuneração"]
+# Checado no título/trecho da listagem E na descrição completa do projeto (antes de chamar
+# a IA). Comparação por trecho de texto. Ex. pra deixar e-commerce de fora:
+#   ["e-commerce", "ecommerce", "loja virtual", "loja online", "woocommerce", "shopify", "nuvemshop"]
 keywords_exclude: []
 
 # Orçamento mínimo aceito, em R$. Deixe null pra não filtrar por mínimo.
@@ -32,9 +35,22 @@ proposal:
   # "automatico" = cálculo pelas opções abaixo (oferta_estrategia, aguardar_media, IA de preço).
   valor_modo: "manual"
 
+  # Envio automático, sem aprovação no Telegram — só projetos da varredura (link colado
+  # continua pedindo aprovação). No Telegram só chega o resultado (✅ enviada / ⚠️ falha com
+  # "🔄 Tentar de novo"). Não envia sozinha — vira falha — se a proposta ficou sem
+  # valor/prazo, a IA não gerou o texto ou a oferta passou de oferta_maxima. Precisa de
+  # valor_modo "automatico" (de preferência com oferta_estrategia "ia").
+  envio_automatico:
+    ativo: false
+    respeitar_limite_diario: true  # para no dia em MONTHLY_PROPOSAL_QUOTA / dias do mês (.env)
+    oferta_maxima: null            # ex: 3000 — acima disso não envia sozinha
+    promover: false                # true = marca "proposta promovida" quando disponível
 
   # "orcamento_cliente" usa o valor pedido pelo cliente
   # "fixo" usa oferta_fixa abaixo
+  # "ia" = a IA elabora valor e prazo pelo escopo de cada projeto, mirando baixo, sem
+  #   esperar concorrentes; se a página já mostrar a média das propostas, ela entra como
+  #   referência e teto (oferta <= média arredondada pra baixo, prazo <= abaixo da média)
   # "menor_proposta" lê o valor médio das propostas concorrentes no projeto e oferece
   #   essa média arredondada pra baixo na centena (1230 -> 1200; abaixo de R$100, na
   #   dezena); se ainda não houver média, a IA sugere o valor

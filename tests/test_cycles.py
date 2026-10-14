@@ -26,7 +26,7 @@ def site(api, monkeypatch):
         assert page is api.page
         return [dict(p) for p in state["projects"]]
 
-    def prepare(page, project, config, require_average=False):
+    def prepare(page, project, config, require_average=False, check_exclude=False):
         state["prepare_calls"].append((project["id"], require_average))
         return state["prepare"](project)
 

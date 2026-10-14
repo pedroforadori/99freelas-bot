@@ -4,6 +4,7 @@ from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as 
 
 from bot.sources.freelas99 import views
 from bot import site_selectors as sel
+from bot.filter import excluded_keyword
 from bot.logger_setup import get_logger
 from bot.proposal import build_proposal, valor_manual
 from bot.utils import format_currency_br, parse_currency
@@ -23,6 +24,11 @@ AGUARDANDO_MEDIA = "aguardando média de propostas concorrentes"
 # na hora do envio, o checkbox de promoção não está mais disponível — só um freelancer por
 # projeto pode promover. Freelas99Source.on_deferred devolve o projeto pra espera da média.
 PROMOCAO_INDISPONIVEL = "outro freelancer já promoveu antes"
+
+# Começo do motivo devolvido por prepare_proposal(check_exclude=True) quando a descrição
+# COMPLETA (a listagem só mostra um trecho) contém palavra de keywords_exclude — a varredura
+# registra como ignorado pelo filtro, não como falha.
+EXCLUIDO_PELO_FILTRO = "descrição completa contém palavra-chave excluída"
 
 
 def _finish(
@@ -136,7 +142,7 @@ def login(page: Page, email: str, password: str) -> bool:
 
 
 def prepare_proposal(
-    page: Page, project: dict, config: dict, require_average: bool = False
+    page: Page, project: dict, config: dict, require_average: bool = False, check_exclude: bool = False
 ) -> tuple[dict | None, str]:
     """
     Abre a página do projeto, monta a proposta completa (oferta, prazo, texto) SEM
@@ -151,6 +157,10 @@ def prepare_proposal(
     require_average: se True e a página de envio ainda não mostrar a média de propostas
     concorrentes, retorna (None, AGUARDANDO_MEDIA) ANTES de chamar qualquer IA — usado pela
     varredura com proposal.aguardar_media (ver Freelas99Source.run_cycle).
+
+    check_exclude: se True, aplica keywords_exclude também na descrição completa e devolve
+    (None, "EXCLUIDO_PELO_FILTRO: '<palavra>'") antes de chamar qualquer IA. Só a varredura
+    usa — link colado no Telegram não passa pelo filtro.
     """
     if valor_manual(config):
         # Valor/prazo digitados pelo usuário no Telegram: nada a esperar.
@@ -170,6 +180,10 @@ def prepare_proposal(
     # Lida aqui (página do projeto) porque "Enviar proposta" navega pra outra página,
     # onde esse elemento não existe mais.
     full_description = _read_full_description(page)
+    if check_exclude:
+        kw = excluded_keyword(f"{project.get('title', '')} {full_description or ''}", config)
+        if kw:
+            return None, f"{EXCLUIDO_PELO_FILTRO}: '{kw}'"
 
     try:
         # "Enviar proposta" navega pra uma página separada (/project/bid/...), não é

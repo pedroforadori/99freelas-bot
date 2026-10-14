@@ -12,6 +12,19 @@ from bot.logger_setup import get_logger
 log = get_logger(__name__)
 
 
+def excluded_keyword(text: str, config: dict) -> str | None:
+    """
+    Primeira palavra de keywords_exclude contida em `text` (case-insensitive), ou None.
+    Também usada na descrição COMPLETA do projeto (submitter.prepare_proposal), já que a
+    listagem só mostra um trecho dela.
+    """
+    text = (text or "").lower()
+    for kw in config.get("keywords_exclude") or []:
+        if kw.lower() in text:
+            return kw.lower()
+    return None
+
+
 def is_match(project: dict, config: dict) -> tuple[bool, str]:
     """Retorna (aderente: bool, motivo: str) para fins de log."""
     title = (project.get("title") or "").lower()
@@ -26,10 +39,9 @@ def is_match(project: dict, config: dict) -> tuple[bool, str]:
     if max_age_minutes is not None and posted_minutes_ago is not None and posted_minutes_ago > max_age_minutes:
         return False, f"publicado há {posted_minutes_ago:.0f}min, acima do limite de {max_age_minutes}min"
 
-    exclude = [k.lower() for k in config.get("keywords_exclude", [])]
-    for kw in exclude:
-        if kw in text:
-            return False, f"contém palavra-chave excluída: '{kw}'"
+    kw = excluded_keyword(text, config)
+    if kw:
+        return False, f"contém palavra-chave excluída: '{kw}'"
 
     categories = [c.lower() for c in config.get("categories", [])]
     if categories and category not in categories:

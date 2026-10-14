@@ -22,6 +22,7 @@ ORIGEM_LABELS = {
     "fixo": "📌 Valor fixo configurado",
     "media_arredondada": "📊 Média das propostas concorrentes, arredondada pra baixo",
     "manual": "✍️ Definido por você no Telegram",
+    "ia_com_media": "🤖 Elaborado pela IA, limitado à média das propostas concorrentes",
 }
 
 
@@ -189,6 +190,27 @@ def build_proposal(
         # Valor e prazo digitados pelo usuário no Telegram — sem IA de preço (preparo mais
         # rápido). A média dos concorrentes, se houver, só aparece como referência.
         oferta, prazo_dias, origem = None, None, "manual"
+    elif estrategia == "ia" and full_description:
+        # A IA elabora valor/prazo pelo escopo de TODO projeto (pedido do usuário,
+        # 2026-10-14 — envio automático com preço competitivo, sem esperar concorrentes).
+        # A média dos concorrentes, se a página já mostrar, entra no prompt como referência e
+        # vira teto: a oferta nunca fica acima da média arredondada pra baixo, nem o prazo
+        # acima de _prazo_abaixo_da_media. Sem média, vale o desconto competitivo de sempre.
+        sugestao = ai_writer.suggest_price_and_deadline(
+            project, full_description, config, lowest_bid=lowest_bid, media_prazo=media_prazo
+        )
+        if sugestao is None:
+            log.warning("A IA não conseguiu elaborar preço/prazo pra '%s' — proposta não pode ser montada.", project.get("title"))
+            return None
+        oferta_sugerida_ia, prazo_dias = sugestao
+        if lowest_bid:
+            oferta = min(oferta_sugerida_ia, _arredondar_para_baixo(lowest_bid))
+            origem = "ia_com_media"
+        else:
+            oferta = _aplicar_desconto_competitivo(oferta_sugerida_ia, proposal_cfg)
+            origem = "ia"
+        if media_prazo:
+            prazo_dias = min(prazo_dias, _prazo_abaixo_da_media(media_prazo, proposal_cfg))
     elif estrategia == "menor_proposta" and lowest_bid:
         # Média das propostas concorrentes arredondada pra baixo (1230 -> 1200) — decisão do
         # usuário (2026-09-25), no lugar do antigo undercut_percent% abaixo da média.
@@ -219,7 +241,7 @@ def build_proposal(
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
 
-    if media_prazo and origem != "manual":
+    if media_prazo and origem not in ("manual", "ia", "ia_com_media"):
         prazo_dias = _prazo_abaixo_da_media(media_prazo, proposal_cfg)
 
     texto, texto_ia_falhou, texto_variante = _build_texto(project, config, oferta, prazo_dias, full_description)
@@ -240,7 +262,7 @@ def build_proposal(
         "media_prazo": media_prazo,
         "texto_variante": texto_variante,
     }
-    if origem == "ia" and oferta_sugerida_ia != oferta:
+    if origem in ("ia", "ia_com_media") and oferta_sugerida_ia != oferta:
         # Guarda o valor bruto sugerido pela IA (antes do desconto competitivo) pra
         # notifier.py mostrar os dois lado a lado no Telegram — ajuda a validar/lapidar
         # ia_desconto_milhar/ia_preco_minimo em config.yaml com dados reais ao longo do tempo.
