@@ -6,6 +6,7 @@ que foi mandado de volta pro Telegram.
 import pytest
 
 from bot import approvals, manual_queue, storage
+from bot.sources.freelas99 import views
 from tests.conftest import github_email, github_job, project_99, proposal_99
 
 CONFIG = {"proposal": {"ia_provider": "gemini", "ia_model": "x"}}
@@ -347,20 +348,32 @@ def test_link_resultado_projeto_nao_enviado(api, telegram):
     assert not telegram.of("editMessageReplyMarkup")
 
 
-def test_link_cancelar_pede_confirmacao_e_volta(api, telegram):
+def test_link_cancelar_de_mensagem_antiga_cancela_direto(api, telegram):
+    # "link:c" pedia confirmação; hoje cancela direto (mensagens antigas ainda têm o botão).
     telegram.push_callback(f"link:c:{PID}", message_id=882, text=LINK)
     api.poll(CONFIG)
-    teclado = telegram.last("editMessageReplyMarkup")["reply_markup"]["inline_keyboard"]
-    assert teclado[0][0]["callback_data"] == f"link:x:{PID}"
-    assert manual_queue.peek_all() == []
+    assert manual_queue.peek_all()[0]["action"] == "cancel"
 
+
+def test_link_voltar_de_mensagem_antiga(api, telegram):
     telegram.push_callback(f"link:m:{PID}", message_id=882, text=LINK)
     api.poll(CONFIG)
     teclado = telegram.last("editMessageReplyMarkup")["reply_markup"]["inline_keyboard"]
     assert teclado[0][0]["callback_data"] == f"link:p:{PID}"
 
 
-def test_link_cancelar_confirmado_enfileira(api, telegram):
+def test_cancelar_pela_mensagem_de_enviada(api, telegram):
+    views.notify_proposal_result(project_99(), proposal_99(), "sent", "proposta enviada")
+    enviada = telegram.last("sendMessage")
+    callback = enviada["reply_markup"]["inline_keyboard"][0][0]["callback_data"]
+    assert callback == f"link:x:{PID}"
+    telegram.push_callback(callback, message_id=884, text=enviada["text"])
+    api.poll(CONFIG)
+    assert manual_queue.peek_all()[0]["action"] == "cancel"
+    assert manual_queue.peek_all()[0]["url"] == LINK
+
+
+def test_link_cancelar_enfileira(api, telegram):
     telegram.push_callback(f"link:x:{PID}", message_id=883, text=LINK)
     api.poll(CONFIG)
     assert manual_queue.peek_all()[0]["action"] == "cancel"

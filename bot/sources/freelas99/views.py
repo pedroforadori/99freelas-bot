@@ -351,9 +351,13 @@ def notify_proposal_result(
     linhas.append(f"<b>Detalhe:</b> {esc(detail)}")
 
     # Falha real ganha botão de retry (ver telegram_dispatcher). Nunca em simulação.
+    # Envio real ganha "🗑️ Cancelar proposta" (o mesmo cancelamento do menu de link, que acha
+    # o link no texto desta mensagem).
     reply_markup = None
-    if status != "sent" and not simulated and project.get("id"):
-        reply_markup = telegram_api.single_button_keyboard("🔄 Tentar de novo", f"retry:{project['id']}")
+    if status == "sent" and not simulated and project.get("id"):
+        reply_markup = sent_keyboard(project["id"])
+    elif status != "sent" and not simulated and project.get("id"):
+        reply_markup =telegram_api.single_button_keyboard("🔄 Tentar de novo", f"retry:{project['id']}")
 
     telegram_api.send_message("\n".join(linhas), reply_markup)
 
@@ -472,19 +476,14 @@ def link_menu_keyboard(project_id: str) -> dict:
                 {"text": "💬 Respondeu", "callback_data": f"link:r:{project_id}"},
                 {"text": "🏆 Fechou", "callback_data": f"link:f:{project_id}"},
             ],
-            [{"text": "🗑️ Cancelar proposta", "callback_data": f"link:c:{project_id}"}],
+            [{"text": "🗑️ Cancelar proposta", "callback_data": f"link:x:{project_id}"}],
         ]
     }
 
 
-def cancel_confirm_keyboard(project_id: str) -> dict:
-    """Cancelar não tem volta — o menu de link pede uma segunda confirmação."""
-    return {
-        "inline_keyboard": [
-            [{"text": "🗑️ Sim, cancelar a proposta", "callback_data": f"link:x:{project_id}"}],
-            [{"text": "↩️ Voltar", "callback_data": f"link:m:{project_id}"}],
-        ]
-    }
+def sent_keyboard(project_id: str) -> dict:
+    """Botão da mensagem "✅ Proposta enviada": cancela no site direto, sem confirmação."""
+    return telegram_api.single_button_keyboard("🗑️ Cancelar proposta", f"link:x:{project_id}")
 
 
 def notify_cancel_result(url: str, title: str, success: bool, detail: str) -> None:

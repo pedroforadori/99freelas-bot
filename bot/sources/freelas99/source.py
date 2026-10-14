@@ -740,11 +740,10 @@ class Freelas99Source(JobSource):
         """Clique num botão do menu de link (ver views.link_menu_keyboard)."""
         kind, project_id = cb.args
         message_id = cb.message.get("message_id")
-        if kind in ("c", "m"):
-            # "c": pede confirmação antes de cancelar; "m": "↩️ Voltar" pro menu.
-            keyboard = views.cancel_confirm_keyboard(project_id) if kind == "c" else views.link_menu_keyboard(project_id)
+        if kind == "m":
+            # "↩️ Voltar" pro menu — só existe em mensagens antigas, da época da confirmação.
             if message_id:
-                telegram_api.edit_reply_markup(message_id, keyboard)
+                telegram_api.edit_reply_markup(message_id, views.link_menu_keyboard(project_id))
             cb.answer()
             return
         if kind == "p":
@@ -752,7 +751,9 @@ class Freelas99Source(JobSource):
             if result is None:
                 return
             ack, label = "Preparando a proposta...", "⏳ Preparando proposta..."
-        elif kind == "x":
+        elif kind in ("x", "c"):
+            # Cancela direto, sem confirmação (pedido do usuário, 2026-10-14). "c" era o
+            # botão que pedia confirmação — mensagens antigas no chat ainda o têm.
             result = self._enqueue_from_message(
                 cb, project_id, "Não achei o link nessa mensagem — cole o link de novo.", action="cancel"
             )
