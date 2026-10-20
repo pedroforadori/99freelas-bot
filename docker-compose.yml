@@ -11,6 +11,10 @@ services:
       # funciona mesmo se a imagem não tiver o pacote tzdata.
       - TZ=<-03>3
     volumes:
+      # Código montado do host: com HOT_RELOAD=true (default) o bot se reinicia sozinho
+      # quando um .py muda (ex: depois de um git pull), sem rebuild. Dependência nova em
+      # requirements.txt ainda precisa de `docker compose up -d --build`.
+      - ./bot:/app/bot:ro
       - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
       - ./logs:/app/logs

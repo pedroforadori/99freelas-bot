@@ -42,7 +42,7 @@ proposal:
   # valor_modo "automatico" (de preferência com oferta_estrategia "ia").
   envio_automatico:
     ativo: false
-    respeitar_limite_diario: true  # para no dia em MONTHLY_PROPOSAL_QUOTA / dias do mês (.env)
+    respeitar_limite_diario: false # true = para no dia em MONTHLY_PROPOSAL_QUOTA / dias do mês (.env)
     oferta_maxima: null            # ex: 3000 — acima disso não envia sozinha
     promover: false                # true = marca "proposta promovida" quando disponível
 

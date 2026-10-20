@@ -86,6 +86,7 @@ _STATUS_EMOJI = {
     "auth_failed": "🔴",
     "cycle_error": "⚠️",
     "cycle_recovered": "✅",
+    "reloaded": "🔄",
 }
 _STATUS_TITLE = {
     "started": "Bot online",
@@ -94,6 +95,7 @@ _STATUS_TITLE = {
     "auth_failed": "Bot offline — falha ao autenticar",
     "cycle_error": "Problema num ciclo (bot continua rodando)",
     "cycle_recovered": "Ciclo voltou ao normal",
+    "reloaded": "Bot recarregado com o código novo",
 }
 
 

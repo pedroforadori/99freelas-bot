@@ -510,8 +510,10 @@ def _build_chat_user_prompt(ctx: dict, skills: list) -> str:
             "\n\nIMPORTANTE: você JÁ está no meio da conversa com esse cliente. NÃO comece "
             "com cumprimento ('Fala', 'Oi', 'Olá', nome do cliente) — vá direto ao assunto."
         )
+    descricao = f"Descrição do projeto (escrita pelo cliente):\n{ctx['descricao_projeto']}\n" if ctx.get("descricao_projeto") else ""
     return (
         f"Projeto: {ctx['projeto']}\n"
+        f"{descricao}"
         f"Cliente: {ctx['cliente']}\n"
         f"Minhas habilidades/áreas: {', '.join(skills) if skills else '(não informado)'}\n\n"
         f"Conversa até agora (mais antiga primeiro; mensagens de sistema do site mostram a "

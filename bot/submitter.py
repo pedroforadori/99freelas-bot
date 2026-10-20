@@ -6,7 +6,7 @@ from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot.filter import excluded_keyword
 from bot.logger_setup import get_logger
-from bot.proposal import build_proposal, normalizar_para_o_site, valor_manual
+from bot.proposal import OFERTA_MINIMA, build_proposal, normalizar_para_o_site, valor_manual
 from bot.utils import format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -290,6 +290,11 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
     """
     if not dry_run and (proposal.get("oferta") is None or proposal.get("prazo_dias") is None):
         return _finish(project, proposal, False, "valor/prazo não informados — responda à mensagem com o valor e o prazo")
+    if not dry_run and proposal["oferta"] < OFERTA_MINIMA:
+        return _finish(
+            project, proposal, False,
+            f"oferta de R$ {format_currency_br(proposal['oferta'])} abaixo do mínimo de R$ {format_currency_br(OFERTA_MINIMA)}",
+        )
     page.goto(project["url"], wait_until="networkidle")
 
     if page.query_selector(sel.PROPOSAL_ALREADY_SENT_MARKER):

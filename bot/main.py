@@ -10,7 +10,7 @@ from playwright.sync_api import sync_playwright
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))  # permite `python bot/main.py`
 
-from bot import approvals, notifier  # noqa: E402
+from bot import approvals, hot_reload, notifier  # noqa: E402
 from bot.logger_setup import get_logger  # noqa: E402
 from bot.sources import registry  # noqa: E402
 from bot.sources.base import JobSource  # noqa: E402
@@ -104,7 +104,14 @@ class _CycleGuard:
         self._errors[source.name] = 0
 
 
+class _ReloadRequested(Exception):
+    def __init__(self, alterados: list[str]):
+        super().__init__(", ".join(alterados))
+        self.alterados = alterados
+
+
 def main() -> None:
+    watcher = hot_reload.CodeWatcher() if hot_reload.enabled() else None
     load_dotenv()
     config = load_config()
     notifier.install_error_forwarding()
@@ -121,6 +128,7 @@ def main() -> None:
     log.info("Fontes ativas: %s", ", ".join(s.name for s in sources))
     dispatcher = TelegramDispatcher(registry.ALL_SOURCES, config)
 
+    alterados = None  # preenchido quando o hot reload pede reinício
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless) if any(s.needs_browser for s in sources) else None
         try:
@@ -129,7 +137,11 @@ def main() -> None:
                     sys.exit(1)  # ex: sessão do 99Freelas expirada (a fonte já notificou)
 
             log.info("Bot iniciado. Ctrl+C para parar.")
-            notifier.notify_bot_status("started")
+            recarregados = os.environ.pop(hot_reload.RELOADED_ENV, None)
+            if recarregados:
+                notifier.notify_bot_status("reloaded", f"Arquivos alterados: {notifier.esc(recarregados)}")
+            else:
+                notifier.notify_bot_status("started")
             guard = _CycleGuard()
             while True:
                 for source in sources:
@@ -153,7 +165,12 @@ def main() -> None:
                         # TelegramErrorHandler) — categoria de falha diferente da varredura,
                         # não entra no contador de ciclos com erro.
                         log.exception("Erro ao processar aprovações pendentes/tarefas de fundo: %s", e)
+                    # Hot reload só aqui, entre ticks: nunca no meio de um envio/varredura.
+                    if watcher and (alterados := watcher.check()):
+                        raise _ReloadRequested(alterados)
                     time.sleep(_poll_interval(sources, approval_poll_interval, urgent_poll_interval))
+        except _ReloadRequested as reload:
+            alterados = reload.alterados
         except KeyboardInterrupt:
             log.info("Interrompido (Ctrl+C ou parada do container).")
             notifier.notify_bot_status("stopped")
@@ -164,6 +181,9 @@ def main() -> None:
         finally:
             if browser is not None:
                 browser.close()
+
+    if alterados:
+        hot_reload.restart(alterados)
 
 
 if __name__ == "__main__":

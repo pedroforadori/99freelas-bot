@@ -43,9 +43,18 @@ class FakeInboxPage:
         self.posts: list[dict] = []
         self.gotos: list[str] = []
         self.deletes: list[str] = []
+        self.projetos: dict = {}       # idProjeto (str) → HTML da descrição na página do projeto
+        self.project_gets: list[str] = []
         self.context = SimpleNamespace(request=SimpleNamespace(get=self._get, post=self._post))
 
     def _get(self, url, headers=None):
+        if "/project/" in url:
+            self.project_gets.append(url)
+            corpo = self.projetos.get(url.rsplit("-", 1)[-1])
+            if corpo is None:
+                return SimpleNamespace(status=404, text=lambda: "nao encontrado")
+            html_ = f'<div class="item-text project-description">{corpo}</div>'
+            return SimpleNamespace(status=200, text=lambda: html_)
         base, query = url.split("?data=")
         data = json.loads(urllib.parse.unquote(query))
         self.gets.append({"url": base, "data": data})
@@ -129,7 +138,10 @@ def test_notifica_mensagem_nova_do_cliente(page, telegram, snapshot):
     # Leu sem marcar como lida.
     assert all(g["data"]["visualizar"] is False for g in page.gets if g["url"] == sel.MESSAGES_API_LIST)
     thread = messages.find_thread(1001)
-    assert thread == {"id": CONV, "cliente": "Bruno M.", "projeto": "Finalização de sistema para salões", "freelancer": "Pedro"}
+    assert thread == {
+        "id": CONV, "cliente": "Bruno M.", "projeto": "Finalização de sistema para salões", "freelancer": "Pedro",
+        "projeto_id": None, "projeto_url": None,
+    }
     assert page.gotos == []  # API funcionou: nada de navegar até /dashboard
 
 
@@ -606,3 +618,53 @@ def test_modo_aprovacao_mantem_as_travas(page, telegram, ia, conversa_em_negocia
     messages.check_and_notify(page, CONFIG_APROVACAO)
     assert "Precisa de você" in telegram.last("sendMessage")["text"]
     assert "cita um valor que você ainda não tinha passado" in telegram.last("sendMessage")["text"]
+
+
+# --- Título e descrição do projeto no aviso ------------------------------------------------
+
+
+DESCRICAO_HTML = "O sistema est&aacute; 90% pronto.<br/>- Integra&ccedil;&atilde;o com gateways<br/>- Seguran&ccedil;a"
+
+
+def test_aviso_mostra_titulo_com_link_e_descricao(page, telegram, snapshot):
+    page.conversas = [conversa(idProjeto=787857)]
+    page.projetos["787857"] = DESCRICAO_HTML
+    page.mensagens[CONV] = [msg(11, "Oi, tudo bem?")]
+    messages.check_and_notify(page)
+
+    aviso = telegram.last("sendMessage")["text"]
+    snapshot("messages_notificacao_com_projeto", aviso)
+    assert '<a href="https://www.99freelas.com.br/project/finalizacao-de-sistema-para-saloes-787857">' in aviso
+    assert "<blockquote expandable>" in aviso and "- Integração com gateways" in aviso
+    # O mapa de conversas (até 500) não guarda a descrição — só o link.
+    thread = messages.find_thread(1001)
+    assert "descricao" not in thread and thread["projeto_url"].endswith("-787857")
+
+
+def test_descricao_buscada_uma_vez_por_projeto(page, telegram):
+    page.conversas = [conversa(idProjeto=787857)]
+    page.projetos["787857"] = DESCRICAO_HTML
+    page.mensagens[CONV] = [msg(11, "Oi")]
+    messages.check_and_notify(page)
+    page.mensagens[CONV].append(msg(12, "Alô?"))
+    messages.check_and_notify(page)
+    assert len(telegram.of("sendMessage")) == 2
+    assert len(page.project_gets) == 1  # a 2ª mensagem usou o cache
+    assert "- Segurança" in telegram.last("sendMessage")["text"]
+
+
+def test_sem_descricao_o_aviso_sai_normal(page, telegram):
+    page.conversas = [conversa(idProjeto=999)]  # página do projeto falha (404)
+    page.mensagens[CONV] = [msg(11, "Oi")]
+    messages.check_and_notify(page)
+    aviso = telegram.last("sendMessage")["text"]
+    assert "Oi" in aviso and "blockquote" not in aviso
+
+
+def test_ia_recebe_a_descricao_do_projeto(page, telegram, ia, conversa_em_negociacao, relogio):
+    page.conversas = [conversa(idProjeto=787857)]
+    page.projetos["787857"] = DESCRICAO_HTML
+    messages.check_and_notify(page, CONFIG_AUTO)
+    assert ia.ctx["descricao_projeto"].startswith("O sistema está 90% pronto.")
+    plano = telegram.of("editMessageText")[-1]["text"]
+    assert "Descrição do projeto" in plano

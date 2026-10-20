@@ -34,6 +34,9 @@ MESSAGES_API_SEND = "https://www.99freelas.com.br/services/user/enviarMensagemCo
 # O "Excluir" de cada mensagem no chat do site: POST .../<idMensagem>?deletar=true (false desfaz).
 MESSAGES_API_DELETE = "https://www.99freelas.com.br/services/user/deletarMensagemConversa/{id}"
 CONVERSATION_URL = "https://www.99freelas.com.br/messages/inbox/{id}"
+# Página do projeto a partir do id da conversa (idProjeto): o site só olha o número no fim,
+# o texto antes é livre (confirmado 2026-10-20: /project/x-787857 abre o projeto 787857).
+PROJECT_URL_BY_ID = "https://www.99freelas.com.br/project/{slug}-{id}"
 
 # --- Login ---
 LOGIN_URL = "https://www.99freelas.com.br/login"

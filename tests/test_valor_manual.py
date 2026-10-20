@@ -48,7 +48,7 @@ def test_parse_valor_prazo(texto, esperado):
     assert _parse_valor_prazo(texto) == esperado
 
 
-@pytest.mark.parametrize("texto", ["trezentos", "1200", "0 5", "1200 0", "", "dez dias"])
+@pytest.mark.parametrize("texto", ["trezentos", "1200", "0 5", "1200 0", "", "dez dias", "99,99 5", "80 3"])
 def test_parse_valor_prazo_invalido(texto):
     assert _parse_valor_prazo(texto) is None
 
@@ -167,3 +167,25 @@ def test_valor_solto_sem_proposta_aguardando_e_ignorado(api, telegram):
     telegram.push_message("300 5")
     api.poll(CONFIG)
     assert not telegram.of("sendMessage")
+
+
+# --- valor mínimo (R$ 100,00) -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("media,esperado", [(85.0, 100.0), (60.0, 100.0), (130.0, 100.0), (250.0, 200.0)])
+def test_oferta_calculada_nunca_fica_abaixo_do_minimo(media, esperado):
+    config = {"proposal": {"valor_modo": "automatico", "oferta_estrategia": "menor_proposta", "texto_modo": "fixo"}}
+    resultado = proposal_mod.build_proposal(project_99(), config, lowest_bid=media)
+    assert resultado["oferta"] == esperado
+
+
+def test_finalize_nunca_envia_abaixo_do_minimo(api):
+    class PaginaQueNaoPodeSerUsada:
+        def __getattr__(self, nome):
+            raise AssertionError(f"não devia tocar na página ({nome})")
+
+    ok, detalhe = submitter.finalize_submission(
+        PaginaQueNaoPodeSerUsada(), project_99(), proposal_99(oferta=99.0, prazo_dias=5)
+    )
+    assert not ok
+    assert "abaixo do mínimo de R$ 100,00" in detalhe

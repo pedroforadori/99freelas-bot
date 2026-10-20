@@ -26,6 +26,12 @@ ORIGEM_LABELS = {
 }
 
 
+# Menor oferta que o bot envia ao 99Freelas (regra do usuário, 2026-10-15). Valor calculado
+# abaixo disso sobe pra ele (build_proposal); digitado abaixo disso no Telegram é recusado
+# (source._parse_oferta); e submitter.finalize_submission nunca envia abaixo disso.
+OFERTA_MINIMA = 100.0
+
+
 def valor_manual(config: dict) -> bool:
     """
     proposal.valor_modo == "manual" (default, 2026-10-02): o bot não calcula oferta/prazo —
@@ -257,6 +263,10 @@ def build_proposal(
         # usa o orçamento anunciado pelo cliente; se não houver, cai pra oferta_fixa ou 0
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
+
+    if oferta and oferta < OFERTA_MINIMA:
+        log.info("Oferta de R$%s para '%s' abaixo do mínimo — usando R$%s.", oferta, project.get("title"), OFERTA_MINIMA)
+        oferta = OFERTA_MINIMA
 
     if media_prazo and origem not in ("manual", "ia", "ia_com_media"):
         prazo_dias = _prazo_abaixo_da_media(media_prazo, proposal_cfg)

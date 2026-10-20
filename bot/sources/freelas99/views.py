@@ -45,8 +45,26 @@ _REPLY_HINT_OUTRA = "↩️ <i>Responda a esta mensagem pra mandar outra (escrit
 
 
 def _conversa_header(conversa: dict) -> str:
-    projeto = f"\nProjeto: <i>{esc(conversa['projeto'])}</i>" if conversa.get("projeto") else ""
+    projeto = ""
+    if conversa.get("projeto"):
+        nome = f"<i>{esc(conversa['projeto'])}</i>"
+        if conversa.get("projeto_url"):
+            nome = f'<a href="{conversa["projeto_url"]}">{nome}</a>'
+        projeto = f"\nProjeto: {nome}"
     return f"<b>{esc(conversa['cliente'])}</b>{projeto}"
+
+
+def _projeto_bloco(conversa: dict, max_chars: int = 1200) -> str:
+    """
+    Descrição do projeto (messages.project_description) num bloco recolhível — toca pra
+    expandir. Só nos avisos de mensagem de cliente; nas confirmações não (a conversa vem do
+    mapa de threads, sem a descrição).
+    """
+    descricao = conversa.get("descricao")
+    if not descricao:
+        return ""
+    texto = telegram_api.truncate_escaped(esc(descricao), max_chars, suffix="… (continua no site)")
+    return f"\n<blockquote expandable>📋 <b>Descrição do projeto</b>\n{texto}</blockquote>"
 
 
 def _conversa_link(conversa: dict) -> str:
@@ -71,7 +89,7 @@ def notify_client_messages(conversa: dict, mensagens: list[dict], motivo_sem_ia:
     `motivo_sem_ia`: por que a IA não respondeu (projeto já contratado/fechado etc.), quando
     a resposta automática está ligada. Devolve o message_id — vira thread (reply = resposta).
     """
-    cabecalho = f"{_PREFIX}💬 Nova mensagem de {_conversa_header(conversa)}\n\n"
+    cabecalho = f"{_PREFIX}💬 Nova mensagem de {_conversa_header(conversa)}{_projeto_bloco(conversa)}\n\n"
     aviso = f"\n\nℹ️ <i>A IA não respondeu: {esc(motivo_sem_ia)}.</i>" if motivo_sem_ia else ""
     rodape = f"{aviso}\n\n{_conversa_link(conversa)}\n{_REPLY_HINT}"
     corpo = _cliente_bloco(mensagens, telegram_api.MSG_LIMIT - len(cabecalho) - len(rodape) - 40)
@@ -123,7 +141,7 @@ def render_auto_reply(grupo: dict) -> tuple[str, dict | None]:
             f"<i>{_PARTE_STATUS.get(parte['status'], parte['status']).format(hora=hora)}</i>\n"
             f"{telegram_api.truncate_escaped(esc(parte['texto']), limite_parte, suffix='…')}"
         )
-    cabecalho = f"{_PREFIX}{titulo}\n\n💬 <b>Cliente:</b>\n"
+    cabecalho = f"{_PREFIX}{titulo}{_projeto_bloco(conversa, 800)}\n\n💬 <b>Cliente:</b>\n"
     rodape = (
         "\n\n🤖 <b>Resposta (em partes, como alguém digitando):</b>\n"
         + "\n\n".join(linhas_partes)
@@ -149,11 +167,11 @@ def notify_escalation(
     todas as travas e só espera o seu clique — sai em partes, no ritmo de digitação.
     """
     if motivo is None:
-        cabecalho = f"{_PREFIX}📝 Resposta da IA pra aprovar — {_conversa_header(conversa)}\n\n💬 <b>Cliente:</b>\n"
+        cabecalho = f"{_PREFIX}📝 Resposta da IA pra aprovar — {_conversa_header(conversa)}{_projeto_bloco(conversa, 800)}\n\n💬 <b>Cliente:</b>\n"
         titulo_sugestao, aviso, botao = "🤖 <b>Resposta da IA (NÃO enviada):</b>", "", "✅ Enviar pro cliente"
         dica = "↩️ <i>Aprove pelo botão (sai em partes, como alguém digitando), ou responda a esta mensagem com o seu texto.</i>"
     else:
-        cabecalho = f"{_PREFIX}✋ Precisa de você — {_conversa_header(conversa)}\n\n💬 <b>Cliente:</b>\n"
+        cabecalho = f"{_PREFIX}✋ Precisa de você — {_conversa_header(conversa)}{_projeto_bloco(conversa, 800)}\n\n💬 <b>Cliente:</b>\n"
         titulo_sugestao, botao = "✍️ <b>Sugestão da IA (NÃO enviada):</b>", "✅ Enviar sugestão"
         aviso = f"\n\n⚠️ <i>A IA não respondeu sozinha: {esc(motivo)}</i>"
         dica = "↩️ <i>Envie a sugestão pelo botão, ou responda a esta mensagem com o seu texto.</i>"

@@ -42,8 +42,11 @@ import re
 import random
 import threading
 import time
+import unicodedata
 import urllib.parse
 from datetime import datetime
+
+from bs4 import BeautifulSoup
 
 from bot import ai_writer
 from bot.sources.freelas99 import views
@@ -61,6 +64,8 @@ MAX_THREADS = 500               # mapeamentos message_id → conversa guardados 
 MAX_DRAFTS = 200
 MAX_MESSAGES_PER_CONVERSA = 20  # mensagens lidas por conversa (novas + contexto pra IA)
 MAX_UNREAD_CONVERSAS = 20
+MAX_PROJETOS_CACHE = 100        # descrições de projeto guardadas (os mais antigos saem)
+PROJETO_CACHE_SEGUNDOS = 6 * 3600  # o cliente pode editar a descrição; relê depois disso
 
 _STATUS_SUCESSO = 1
 _STATUS_DESLOGADO = 8
@@ -125,9 +130,14 @@ def _trim(mapping: dict, limit: int) -> None:
 
 
 def register_thread(telegram_message_id: int | None, conversa: dict) -> None:
-    """Liga uma mensagem do Telegram à conversa — responder a ela responde ao cliente."""
+    """
+    Liga uma mensagem do Telegram à conversa — responder a ela responde ao cliente. A
+    descrição do projeto (só pra mostrar no aviso) não vai pro mapa: são até MAX_THREADS
+    entradas, e ela já está no cache de projetos.
+    """
     if not telegram_message_id:
         return
+    conversa = {k: v for k, v in conversa.items() if k != "descricao"}
     with _LOCK:
         data = _load_threads()
         data["threads"][str(telegram_message_id)] = conversa
@@ -303,6 +313,7 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
                 "id": conversa_id,
                 "cliente": cliente,
                 "projeto": html_to_text(conv.get("nomeProjeto")),
+                "projeto_id": conv.get("idProjeto"),
                 "freelancer": freelancer,
             },
             "recem_chegadas": [resumo(m) for m in recem],
@@ -320,7 +331,52 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
             ),
             "bloqueio_ia": _negotiation_blocker(conv),
         })
+        novas[-1]["conversa"]["projeto_url"] = project_url(novas[-1]["conversa"])
     return novas
+
+
+def _slug(texto: str) -> str:
+    sem_acento = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
+    return re.sub(r"[^a-z0-9]+", "-", sem_acento.lower()).strip("-") or "projeto"
+
+
+def project_url(conversa: dict) -> str | None:
+    if not conversa.get("projeto_id"):
+        return None
+    return sel.PROJECT_URL_BY_ID.format(slug=_slug(conversa.get("projeto")), id=conversa["projeto_id"])
+
+
+def project_description(page, conversa: dict) -> str | None:
+    """
+    Descrição completa do projeto da conversa, pra mostrar no aviso (e dar de contexto pra
+    IA) sem precisar abrir o site. GET da página do projeto via page.context.request (não
+    navega a Page), com cache por projeto. Falha → None (o aviso sai sem a descrição).
+    """
+    projeto_id = conversa.get("projeto_id")
+    if not projeto_id:
+        return None
+    chave = str(projeto_id)
+    cache = (_load_cache().get("projetos") or {}).get(chave)
+    if cache and _now() - cache.get("em", 0) < PROJETO_CACHE_SEGUNDOS:
+        return cache.get("descricao")
+    try:
+        resp = page.context.request.get(project_url(conversa))
+        if resp.status != 200:
+            raise InboxError(f"HTTP {resp.status}")
+        el = BeautifulSoup(resp.text(), "html.parser").select_one(sel.PROJECT_PAGE_DESCRIPTION)
+        descricao = html_to_text(el.decode_contents()) if el else None
+    except Exception as e:
+        log.info("Não consegui ler a descrição do projeto %s: %s", projeto_id, e)
+        return cache.get("descricao") if cache else None
+    if descricao:
+        with _LOCK:
+            dados = _load_cache()
+            projetos = dados.setdefault("projetos", {})
+            projetos.pop(chave, None)
+            projetos[chave] = {"descricao": descricao, "em": _now()}
+            _trim(projetos, MAX_PROJETOS_CACHE)
+            _save_json(CACHE_PATH, dados)
+    return descricao
 
 
 def send_reply(page, conversa_id: int, texto: str) -> tuple[bool, str, int | None]:
@@ -473,9 +529,11 @@ def check_and_notify(page, config: dict | None = None) -> None:
                 _supersede(conversa["id"])
                 if _now() - item["ultima_chegada"] < aguardar:
                     continue  # o cliente pode estar escrevendo mais — checa de novo depois
+                conversa["descricao"] = project_description(page, conversa)
                 _auto_reply(page, item, config)
                 continue
 
+        conversa["descricao"] = project_description(page, conversa)
         if auto:
             message_id = views.notify_client_messages(conversa, item["recem_chegadas"], motivo_sem_ia=motivo)
         else:
@@ -498,6 +556,7 @@ def _auto_reply(page, item: dict, config: dict) -> None:
         "freelancer": conversa.get("freelancer"),
         "cliente": conversa["cliente"],
         "projeto": conversa["projeto"],
+        "descricao_projeto": conversa.get("descricao"),
         "historico": item["historico"],
         "novas": [m["texto"] or "(anexo)" for m in mensagens],
         "tem_anexo": any(m["tem_arquivos"] for m in mensagens),

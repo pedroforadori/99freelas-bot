@@ -121,10 +121,16 @@ def test_bloqueado_vira_falha_sem_enviar(api, telegram, site, proposal, motivo):
     assert "Falha ao enviar proposta" in falha["text"] and motivo in falha["text"]
 
 
-def test_limite_diario_para_a_varredura(api, site):
+def test_limite_diario_nao_para_por_padrao(api, site):
+    """Decisão do usuário: o limite diário só avisa ("Hoje: X/Y"), nunca para a varredura."""
     site["projects"] = [project_99(id=str(i), title=f"P{i}") for i in range(12)]
     api.run_cycle(_config())
-    # 240 / 30 dias (data congelada em setembro) = 8 por dia
+    assert len(site["enviados"]) > 8  # 240 / 30 dias (data congelada em setembro) = 8 por dia
+
+
+def test_limite_diario_opcional_para_a_varredura(api, site):
+    site["projects"] = [project_99(id=str(i), title=f"P{i}") for i in range(12)]
+    api.run_cycle(_config(respeitar_limite_diario=True))
     assert len(site["enviados"]) == 8
     assert not storage.already_applied("8")
 

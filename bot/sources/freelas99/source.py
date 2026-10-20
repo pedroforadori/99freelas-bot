@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from bot import ai_writer, approvals, connections, manual_queue, messages, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.proposal import describe_valor, valor_manual
+from bot.proposal import OFERTA_MINIMA, describe_valor, valor_manual
 from bot.sources.base import Callback, CallbackRoute, EditableField, JobSource
 from bot.sources.freelas99 import auth, views
 from bot.storage import already_applied, register_application
@@ -29,7 +29,7 @@ log = get_logger(__name__)
 
 def _parse_oferta(raw: str) -> float | None:
     valor = parse_currency(raw)
-    if valor is None or valor < 0:
+    if valor is None or valor < OFERTA_MINIMA:
         return None
     return round(valor, 2)
 
@@ -73,7 +73,8 @@ def _parse_valor_prazo(raw: str) -> tuple[float, int] | None:
 
 _VALOR_PRAZO_INVALIDO = (
     "Não entendi. Responda à mensagem do projeto com o valor e o prazo em dias, "
-    "ex: <code>1200 10</code> (R$ 1.200,00 em 10 dias)."
+    "ex: <code>1200 10</code> (R$ 1.200,00 em 10 dias). Valor mínimo: "
+    f"R$ {format_currency_br(OFERTA_MINIMA)}."
 )
 
 
@@ -81,7 +82,10 @@ OFERTA = EditableField(
     code="o",
     button="✏️ Editar oferta",
     prompt="Digite a nova oferta em R$ (ex: 150 ou 150,00):",
-    invalid_msg="Não entendi o valor. Responda de novo à mensagem anterior com a nova oferta em R$.",
+    invalid_msg=(
+        "Não entendi o valor. Responda de novo à mensagem anterior com a nova oferta em R$ "
+        f"(mínimo R$ {format_currency_br(OFERTA_MINIMA)})."
+    ),
     parse=_parse_oferta,
     apply=_apply_oferta,
 )
@@ -126,8 +130,12 @@ def _bloqueio_envio_automatico(proposal: dict, config: dict) -> str | None:
 
 
 def _limite_automatico_atingido(config: dict) -> bool:
+    """
+    Só com envio_automatico.respeitar_limite_diario: true (default false — decisão do usuário,
+    a mesma de 2026-09-23 pro envio com aprovação: o limite diário só avisa, nunca para).
+    """
     cfg = _auto_cfg(config)
-    return bool(cfg.get("ativo") and cfg.get("respeitar_limite_diario", True) and views._limite_diario_atingido())
+    return bool(cfg.get("ativo") and cfg.get("respeitar_limite_diario", False) and views._limite_diario_atingido())
 
 
 def _pausa_entre_preparos(proposal: dict, minimo: float, maximo: float) -> float:
@@ -183,6 +191,9 @@ class Freelas99Source(JobSource):
             self._recheck_awaiting_average(config)
 
         projects = scraper.fetch_open_projects(self.page)
+        # Cookies renovados pelo site → disco, pro próximo início (hot reload, reinício)
+        # não partir de uma sessão velha (ver auth.save_session).
+        auth.save_session(self.page)
         new_projects = [p for p in projects if not already_applied(p["id"])]
         log.info("%d projetos novos (de %d na página) ainda não avaliados.", len(new_projects), len(projects))
         if new_projects:

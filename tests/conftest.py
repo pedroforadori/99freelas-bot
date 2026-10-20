@@ -31,6 +31,7 @@ from bot import ai_writer, approvals, connections, email_sender, manual_queue, m
 from bot import main, notifier, storage, submitter, telegram_api, utils  # noqa: E402
 from bot.sources import registry  # noqa: E402
 from bot.sources.apinfo import client as apinfo_client  # noqa: E402
+from bot.sources.freelas99 import auth as auth_99  # noqa: E402
 from bot.sources.freelas99 import views as views_99  # noqa: E402
 from bot.sources.github import client as github_jobs  # noqa: E402
 from bot.sources.github import views as views_gh  # noqa: E402
@@ -168,6 +169,7 @@ def _data_paths():
         (apinfo_client, "DEBUG_DIR", "apinfo_debug"),
         (apinfo_client, "STATE_PATH", "apinfo_state.json"),
         (telegram_api, "_OFFSET_PATH", "telegram_offset.json"),
+        (auth_99, "AUTH_STATE_PATH", "auth_state.json"),
     ]
 
 

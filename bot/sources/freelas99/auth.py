@@ -1,4 +1,5 @@
 """Sessão autenticada do 99Freelas no Playwright (usada pelo bot real e pelo dry_run)."""
+import json
 import os
 
 from bot import notifier, submitter
@@ -9,6 +10,32 @@ log = get_logger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 AUTH_STATE_PATH = os.path.join(BASE_DIR, "data", "auth_state.json")
+
+
+def save_session(page) -> bool:
+    """
+    Grava os cookies ATUAIS do navegador em data/auth_state.json. O site renova a sessão
+    enquanto o bot navega, mas só na memória do Chromium — o arquivo continuava com os
+    cookies da última importação. Confirmado em produção (2026-10-20): um hot reload
+    reiniciou o processo, ele leu o auth_state.json de 18/09 e parou com "sessão expirou",
+    embora o processo antigo estivesse logado. Chamado a cada varredura bem-sucedida; só
+    grava se a página ainda está logada (nunca troca uma sessão boa por uma deslogada).
+    Escrita atômica (.tmp + os.replace). Falha só loga — nunca derruba o ciclo.
+    """
+    try:
+        if not submitter.is_logged_in(page):
+            log.warning("Sessão do 99Freelas parece deslogada — auth_state.json NÃO foi atualizado.")
+            return False
+        estado = page.context.storage_state()
+        os.makedirs(os.path.dirname(AUTH_STATE_PATH), exist_ok=True)
+        tmp_path = AUTH_STATE_PATH + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(estado, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, AUTH_STATE_PATH)
+        return True
+    except Exception as e:
+        log.info("Não consegui salvar a sessão do 99Freelas: %s", e)
+        return False
 
 
 def open_authenticated_page(browser):
