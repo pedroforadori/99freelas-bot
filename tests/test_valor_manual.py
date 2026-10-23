@@ -156,6 +156,29 @@ def test_texto_estruturado_usa_prompt_proprio(monkeypatch):
     assert "EXATAMENTE 3 partes" in prompts[0]
 
 
+# --- texto em 5 blocos -------------------------------------------------------------------
+
+
+def test_sorteio_so_com_blocos():
+    cfg = {"texto_variantes": {"blocos": 1, "estruturado": 0}}
+    assert {proposal_mod._sortear_variante_texto(cfg) for _ in range(30)} == {"blocos"}
+
+
+def test_texto_blocos_usa_prompt_proprio(monkeypatch):
+    prompts = []
+
+    def fake_gemini(user_prompt, model, system_prompt=None):
+        prompts.append(system_prompt)
+        return "Olá, tudo bem?\n\nVocê quer X.\n\n- Etapa 1\n\nVocê pode ver trabalhos parecidos no portfólio do meu perfil."
+
+    monkeypatch.setitem(ai_writer._PROVIDERS, "gemini", (fake_gemini, "x"))
+    ai_writer.generate_proposal_text(project_99(), "Descrição", CONFIG, variante="blocos")
+    assert prompts == [ai_writer._text_system_prompt("blocos")]
+    assert prompts[0].startswith(ai_writer._SYSTEM_PROMPT_BASE)
+    assert "5 blocos curtos" in prompts[0]
+    assert "portfólio do meu perfil" in prompts[0]
+
+
 def test_valor_solto_sem_reply_explica(api, telegram, pending_manual):
     telegram.push_message("300 5")
     api.poll(CONFIG)

@@ -113,6 +113,30 @@ _TEXT_VARIANTS = {
         "disponibilidade pra começar e convite pra conversar ou tirar dúvidas. Sem valor e sem prazo.\n"
         "- Tom profissional e próximo, sem floreios. No máximo 1300 caracteres no total.\n"
     ),
+    # 5 blocos curtos pedidos pelo usuário (2026-10-21) — único ligado no config.yaml; o
+    # "estruturado" fica com peso 0 pra reativar.
+    "blocos": (
+        "- Escreva 5 blocos curtos, nesta ordem, separados por uma linha em branco, sem "
+        "títulos nem rótulos:\n"
+        "  1. Apenas \"Olá, tudo bem?\".\n"
+        "  2. Duas frases: a primeira diz o resultado que o cliente quer; a segunda aponta o "
+        "ponto principal ou mais delicado do projeto, usando as palavras da descrição dele.\n"
+        "  3. Uma frase curta de introdução e de 2 a 4 etapas com \"-\", na ordem em que serão "
+        "feitas. A primeira etapa é sempre uma entrega pequena e rápida para o cliente aprovar "
+        "antes de seguir. Não repita a lista de requisitos do cliente; agrupe em etapas.\n"
+        "  4. Exatamente: \"Você pode ver trabalhos parecidos no portfólio do meu perfil.\"\n"
+        "  5. Uma frase convidando a começar, fácil de responder com sim (ex: \"Se fizer "
+        "sentido pra você, consigo começar hoje mesmo.\").\n"
+        "- Projeto simples: até 600 caracteres no total. Projeto grande ou com muitos "
+        "requisitos: até 900.\n"
+        "- Proibido: \"entendi perfeitamente\", \"tenho grande interesse\", \"transformar sua "
+        "ideia\", \"100% pronto\", \"totalmente testado\", ou prometer o que não está na descrição.\n"
+        "- Não cite experiência, anos de carreira nem clientes anteriores.\n"
+        "- Não faça perguntas técnicas; dúvidas ficam para depois que o cliente aceitar.\n"
+        "- Exceção à regra de tecnologias acima: só cite uma tecnologia se o próprio cliente "
+        "a citou na descrição.\n"
+        "- Use só hífen comum \"-\", nunca travessão.\n"
+    ),
 }
 TEXT_VARIANTS = tuple(_TEXT_VARIANTS)
 

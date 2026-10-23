@@ -180,6 +180,10 @@ def _data_paths():
 def api(monkeypatch):
     page = object()  # Playwright nunca é usado de verdade: submitter é mockado nos testes
     monkeypatch.setattr(FREELAS99, "page", page)
+    # Page falsa: a sessão conta como logada e nada é gravado em auth_state.json
+    # (testes de sessão caída trocam is_logged_in via patch_submitter).
+    monkeypatch.setattr(submitter, "is_logged_in", lambda page: True)
+    monkeypatch.setattr(auth_99, "save_session", lambda page: True)
 
     def render_approval(project, proposal):
         return registry.source_of(project).render_approval(project, proposal)

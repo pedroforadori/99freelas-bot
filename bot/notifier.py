@@ -87,6 +87,8 @@ _STATUS_EMOJI = {
     "cycle_error": "⚠️",
     "cycle_recovered": "✅",
     "reloaded": "🔄",
+    "session_lost": "🔴",
+    "session_restored": "✅",
 }
 _STATUS_TITLE = {
     "started": "Bot online",
@@ -96,6 +98,8 @@ _STATUS_TITLE = {
     "cycle_error": "Problema num ciclo (bot continua rodando)",
     "cycle_recovered": "Ciclo voltou ao normal",
     "reloaded": "Bot recarregado com o código novo",
+    "session_lost": "Sessão do 99Freelas caiu (bot continua rodando)",
+    "session_restored": "Sessão do 99Freelas de volta",
 }
 
 

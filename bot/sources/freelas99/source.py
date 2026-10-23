@@ -11,7 +11,7 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from bot import ai_writer, approvals, connections, manual_queue, messages, scraper, storage, submitter, telegram_api
+from bot import ai_writer, approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
 from bot.proposal import OFERTA_MINIMA, describe_valor, valor_manual
@@ -159,6 +159,10 @@ class Freelas99Source(JobSource):
         self.page = None
         self._messages_poll_interval = 15
         self._next_messages_check_at = 0.0  # força checar mensagens já no primeiro tick
+        # Sessão caiu com o bot rodando (ver _on_session_lost): para de mexer no site até o
+        # auth_state.json mudar (importação nova). Guarda o mtime do arquivo na queda.
+        self._sem_sessao = False
+        self._session_mtime_na_queda = None
 
     # --- ciclo de vida -------------------------------------------------------------------
 
@@ -181,6 +185,19 @@ class Freelas99Source(JobSource):
         Telegram e ele decide se gasta conexões extras (a mensagem de aprovação mostra
         "Hoje: X/Y" com aviso quando X >= Y).
         """
+        if self._sem_sessao and not self._try_restore_session():
+            return
+
+        # A listagem abre mesmo deslogado — por isso a checagem logo depois dela, antes de
+        # tudo que precisa de login (dashboard, preparo, envio).
+        projects = scraper.fetch_open_projects(self.page)
+        if not submitter.is_logged_in(self.page):
+            self._on_session_lost()
+            return
+        # Cookies renovados pelo site → disco, pro próximo início (hot reload, reinício)
+        # não partir de uma sessão velha (ver auth.save_session).
+        auth.save_session(self.page)
+
         # Saldo real de conexões (lido de /dashboard) uma vez por ciclo — usado pelo
         # contador "Conexões usadas: X/Y" das notificações (views._conexoes_usadas_line).
         connections.refresh(self.page)
@@ -190,10 +207,6 @@ class Freelas99Source(JobSource):
         if aguardar_media:
             self._recheck_awaiting_average(config)
 
-        projects = scraper.fetch_open_projects(self.page)
-        # Cookies renovados pelo site → disco, pro próximo início (hot reload, reinício)
-        # não partir de uma sessão velha (ver auth.save_session).
-        auth.save_session(self.page)
         new_projects = [p for p in projects if not already_applied(p["id"])]
         log.info("%d projetos novos (de %d na página) ainda não avaliados.", len(new_projects), len(projects))
         if new_projects:
@@ -337,7 +350,49 @@ class Freelas99Source(JobSource):
             self._queue(project, proposal, detail="aguardando aprovação no Telegram")
             self._pause(_pausa_entre_preparos(proposal, 3, 8), config)
 
+    def _on_session_lost(self) -> None:
+        """
+        Sessão derrubada pelo site com o bot rodando (visto em produção, 2026-10-23: caiu às
+        10:32 e o bot seguiu deslogado, avisando "layout mudou?" a cada ciclo). Login
+        automático é barrado pelo Turnstile, então só resta o usuário importar cookies
+        novos: avisa UMA vez e para de usar o site até o auth_state.json mudar.
+        """
+        self._sem_sessao = True
+        self._session_mtime_na_queda = auth.session_file_mtime()
+        log.info("Sessão do 99Freelas caiu — aguardando cookies novos em %s.", auth.AUTH_STATE_PATH)
+        notifier.notify_bot_status(
+            "session_lost",
+            "O site deslogou o bot. Exporte os cookies do 99freelas.com.br do seu navegador "
+            "(já logado) e rode <code>python bot/import_cookies.py caminho/do/export.json</code> "
+            "— o bot percebe o arquivo novo e volta sozinho, sem reiniciar. Enquanto isso, "
+            "nada é enviado (aprovações falham com \"🔄 Tentar de novo\").",
+        )
+
+    def _try_restore_session(self) -> bool:
+        """Com o auth_state.json alterado desde a queda, abre um contexto novo com ele."""
+        mtime = auth.session_file_mtime()
+        if mtime is None or mtime == self._session_mtime_na_queda:
+            return False
+        self._session_mtime_na_queda = mtime
+        try:
+            self.page, logado = auth.reopen_session(self.page)
+        except Exception as e:
+            log.info("Não consegui abrir a sessão nova do 99Freelas: %s", e)
+            return False
+        if not logado:
+            notifier.notify_bot_status(
+                "session_lost", "Os cookies importados também não estão logados — exporte de novo."
+            )
+            return False
+        self._sem_sessao = False
+        self._next_messages_check_at = 0.0
+        log.info("Sessão do 99Freelas restaurada a partir de %s.", auth.AUTH_STATE_PATH)
+        notifier.notify_bot_status("session_restored")
+        return True
+
     def tick(self, config: dict) -> None:
+        if self._sem_sessao:
+            return  # nada do site funciona deslogado; run_cycle tenta restaurar
         # Respostas/botões de mensagens primeiro: o usuário acabou de agir e espera ver o envio.
         messages.process_outbox(self.page)
         self._service_messages(config)
@@ -461,6 +516,8 @@ class Freelas99Source(JobSource):
 
     def deliver(self, entry: dict) -> tuple[bool, str]:
         project = entry["project"]
+        if self._sem_sessao:
+            return False, "a sessão do 99Freelas caiu — importe os cookies de novo e tente outra vez"
         self.notify(f"🚀 Enviando proposta aprovada: {esc(project.get('title'))}")
         success, detail = submitter.finalize_submission(self.page, project, entry["proposal"])
         if not success and detail == submitter.PROMOCAO_INDISPONIVEL:

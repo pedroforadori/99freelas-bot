@@ -89,10 +89,11 @@ proposal:
   ia_model: "gemini-3.6-flash"   # ajuste conforme o provedor acima
 
   # Estilo do texto (texto_modo "ia"): sorteado a cada proposta pelos pesos abaixo. Peso 0
-  # (ou remover a linha) tira o estilo do sorteio. Desde 2026-10-02 só "estruturado" está
-  # ligado — estrutura única: cumprimento → como resolver (interesse + briefing do que será
-  # feito) → a proposta (o que o cliente recebe, disponibilidade, convite pra conversar).
+  # (ou remover a linha) tira o estilo do sorteio. Desde 2026-10-21 só "blocos" está
+  # ligado — 5 blocos curtos: "Olá, tudo bem?" → resultado + ponto delicado → etapas (a 1ª
+  # é uma entrega rápida pra aprovar) → frase fixa do portfólio → convite pra começar.
   # Os outros estilos continuam disponíveis pra reativar/comparar:
+  #   blocos      — 5 blocos curtos, até 600 caracteres (900 em projeto grande)
   #   estruturado — cumprimento / solução + briefing / proposta, até ~1300 caracteres
   #   padrao      — estilo original: profissional e direto, até ~1500 caracteres
   #   pergunta    — curto, termina com uma pergunta sobre o projeto
@@ -106,7 +107,8 @@ proposal:
   # o link do projeto no chat do bot e clique "💬 Respondeu" (ou "🏆 Fechou"); depois rode
   # `python bot/report.py` pra ver as taxas por estilo.
   texto_variantes:
-    estruturado: 1
+    blocos: 1
+    estruturado: 0
     padrao: 0
     pergunta: 0
     plano: 0

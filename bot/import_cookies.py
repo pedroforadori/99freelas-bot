@@ -6,6 +6,7 @@ próprio Google bloqueia por detectar navegador automatizado ("Esse navegador po
 seguro").
 
 Uso: python bot/import_cookies.py caminho/para/cookies_exportados.json
+     ou cole o export em data/auth_state.json e rode python bot/import_cookies.py (sem argumento)
 """
 import json
 import os
@@ -59,12 +60,27 @@ def _convert_cookie(raw: dict) -> dict | None:
     }
 
 
-def main() -> None:
-    if len(sys.argv) != 2:
-        log.error("Uso: python bot/import_cookies.py caminho/para/cookies_exportados.json")
-        sys.exit(1)
+def _is_raw_export(path: str) -> bool:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return isinstance(json.load(f), list)
+    except (OSError, ValueError):
+        return False
 
-    source_path = sys.argv[1]
+
+def main() -> None:
+    if len(sys.argv) == 2:
+        source_path = sys.argv[1]
+    elif len(sys.argv) == 1 and _is_raw_export(AUTH_STATE_PATH):
+        # Export do Cookie-Editor colado direto em data/auth_state.json (o jeito que o
+        # usuário faz na prática): converte ele mesmo.
+        source_path = AUTH_STATE_PATH
+    else:
+        log.error(
+            "Uso: python bot/import_cookies.py caminho/para/cookies_exportados.json "
+            "(ou cole o export em data/auth_state.json e rode sem argumento)"
+        )
+        sys.exit(1)
     if not os.path.exists(source_path):
         log.error("Arquivo não encontrado: %s", source_path)
         sys.exit(1)

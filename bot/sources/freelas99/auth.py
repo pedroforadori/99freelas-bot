@@ -38,6 +38,47 @@ def save_session(page) -> bool:
         return False
 
 
+def session_file_mtime() -> float | None:
+    """mtime do auth_state.json (None se não existe) — pra perceber uma importação nova."""
+    try:
+        return os.path.getmtime(AUTH_STATE_PATH)
+    except OSError:
+        return None
+
+
+def _load_storage_state():
+    """
+    Conteúdo do auth_state.json pro Playwright. Aceita também o export cru do Cookie-Editor
+    (lista de cookies) colado direto no arquivo — já aconteceu (2026-10-20), e o Playwright
+    não entende esse formato; convertido com o mesmo _convert_cookie do import_cookies.py.
+    """
+    with open(AUTH_STATE_PATH, encoding="utf-8") as f:
+        estado = json.load(f)
+    if isinstance(estado, list):
+        from bot.import_cookies import _convert_cookie
+
+        log.info("auth_state.json está no formato do Cookie-Editor — convertendo.")
+        estado = {"cookies": [c for c in map(_convert_cookie, estado) if c], "origins": []}
+    return estado
+
+
+def reopen_session(page):
+    """
+    Troca o contexto do navegador por um novo, a partir do auth_state.json atual (usado
+    quando a sessão caiu com o bot rodando e o usuário importou cookies novos). Retorna
+    (page, logado) — a Page é sempre válida (a antiga é fechada), mesmo se não logou.
+    """
+    browser = page.context.browser
+    try:
+        page.context.close()
+    except Exception:
+        pass
+    context = browser.new_context(storage_state=_load_storage_state())
+    nova = context.new_page()
+    nova.goto(sel.PROJECTS_LIST_URL, wait_until="networkidle")
+    return nova, submitter.is_logged_in(nova)
+
+
 def open_authenticated_page(browser):
     """
     Autentica a sessão do navegador de uma das duas formas:
@@ -52,7 +93,7 @@ def open_authenticated_page(browser):
     Retorna a Page autenticada, ou None se não foi possível autenticar.
     """
     if os.path.exists(AUTH_STATE_PATH):
-        context = browser.new_context(storage_state=AUTH_STATE_PATH)
+        context = browser.new_context(storage_state=_load_storage_state())
         page = context.new_page()
         page.goto(sel.PROJECTS_LIST_URL, wait_until="networkidle")
         if submitter.is_logged_in(page):

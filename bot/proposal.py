@@ -60,6 +60,7 @@ TEXTO_VARIANTE_LABELS = {
     "opcoes": "dois caminhos pro cliente escolher",
     "conversa": "conversa informal",
     "estruturado": "estruturado (cumprimento → solução → proposta)",
+    "blocos": "5 blocos (resultado → etapas → portfólio → convite)",
     "template": "template fixo do config.yaml",
 }
 
