@@ -1,0 +1,29 @@
+{
+  "disable_web_page_preview": true,
+  "parse_mode": "HTML",
+  "reply_markup": {
+    "inline_keyboard": [
+      [
+        {
+          "callback_data": "editf:o:wk-desenvolvimento-de-aplicativo-de-agendamento",
+          "text": "✏️ Editar oferta"
+        },
+        {
+          "callback_data": "editf:p:wk-desenvolvimento-de-aplicativo-de-agendamento",
+          "text": "✏️ Editar prazo"
+        }
+      ],
+      [
+        {
+          "callback_data": "approve:wk-desenvolvimento-de-aplicativo-de-agendamento",
+          "text": "✅ Enviar proposta"
+        },
+        {
+          "callback_data": "reject:wk-desenvolvimento-de-aplicativo-de-agendamento",
+          "text": "❌ Recusar"
+        }
+      ]
+    ]
+  },
+  "text": "<b>[Workana]</b> 📝 <b>Proposta pra aprovar</b>\n<b>Projeto:</b> Desenvolvimento de Aplicativo de Agendamento\n<b>Link:</b> https://www.workana.com/job/desenvolvimento-de-aplicativo-de-agendamento\n<b>Orçamento do cliente:</b> R$ 2.500 - 5.000\n<b>Propostas até agora:</b> 5\n<b>Oferta (valor que o cliente vê; a comissão do Workana sai dele):</b> R$ 2500,00 (mínimo da faixa do cliente)\n<b>Lance mínimo do site:</b> R$ 1500,00\n<b>Prazo:</b> 20 dias\n\n<b>Descrição:</b>\nBusca-se um desenvolvedor para um app de agendamento.\n \n- Login simples\n- Agenda\n\n<b>Proposta:</b>\nOlá! Posso fazer o seu app de agendamento."
+}

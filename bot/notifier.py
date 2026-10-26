@@ -89,17 +89,21 @@ _STATUS_EMOJI = {
     "reloaded": "🔄",
     "session_lost": "🔴",
     "session_restored": "✅",
+    "source_disabled": "⚠️",
+    "source_started": "✅",
 }
 _STATUS_TITLE = {
     "started": "Bot online",
     "stopped": "Bot parado",
     "stopped_error": "Bot caiu com erro fatal",
-    "auth_failed": "Bot offline — falha ao autenticar",
+    "auth_failed": "Falha ao autenticar no 99Freelas",
     "cycle_error": "Problema num ciclo (bot continua rodando)",
     "cycle_recovered": "Ciclo voltou ao normal",
     "reloaded": "Bot recarregado com o código novo",
     "session_lost": "Sessão do 99Freelas caiu (bot continua rodando)",
     "session_restored": "Sessão do 99Freelas de volta",
+    "source_disabled": "Fonte fora do ar (bot continua rodando)",
+    "source_started": "Fonte de volta",
 }
 
 

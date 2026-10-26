@@ -149,6 +149,12 @@ def _pausa_entre_preparos(proposal: dict, minimo: float, maximo: float) -> float
     return random.uniform(minimo, maximo)
 
 
+_AVISO_AGUARDANDO_COOKIES = (
+    " O bot continua rodando (as outras fontes também) e percebe o arquivo novo sozinho, "
+    "sem reiniciar. Até lá, nada é enviado no 99Freelas."
+)
+
+
 class Freelas99Source(JobSource):
     name = "99freelas"
     tag = views.TAG
@@ -157,6 +163,7 @@ class Freelas99Source(JobSource):
 
     def __init__(self):
         self.page = None
+        self._browser = None
         self._messages_poll_interval = 15
         self._next_messages_check_at = 0.0  # força checar mensagens já no primeiro tick
         # Sessão caiu com o bot rodando (ver _on_session_lost): para de mexer no site até o
@@ -168,8 +175,15 @@ class Freelas99Source(JobSource):
 
     def start(self, browser) -> bool:
         self._messages_poll_interval = int(os.environ.get("MESSAGES_POLL_INTERVAL_SECONDS", 15))
-        self.page = auth.open_authenticated_page(browser)
-        return self.page is not None
+        self._browser = browser
+        self.page = auth.open_authenticated_page(browser, aviso_extra=_AVISO_AGUARDANDO_COOKIES)
+        if self.page is None:
+            # Sem sessão válida já no boot: em vez de derrubar o bot inteiro (e as outras
+            # fontes junto), fica no mesmo modo da queda com o bot rodando — sem usar o site
+            # até o auth_state.json mudar (_try_restore_session).
+            self._sem_sessao = True
+            self._session_mtime_na_queda = auth.session_file_mtime()
+        return True
 
     def owns_id(self, project_id: str) -> bool:
         return project_id.isdigit()
@@ -375,7 +389,7 @@ class Freelas99Source(JobSource):
             return False
         self._session_mtime_na_queda = mtime
         try:
-            self.page, logado = auth.reopen_session(self.page)
+            self.page, logado = auth.reopen_session(self.page, self._browser)
         except Exception as e:
             log.info("Não consegui abrir a sessão nova do 99Freelas: %s", e)
             return False

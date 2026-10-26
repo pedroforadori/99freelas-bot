@@ -62,24 +62,26 @@ def _load_storage_state():
     return estado
 
 
-def reopen_session(page):
+def reopen_session(page, browser=None):
     """
     Troca o contexto do navegador por um novo, a partir do auth_state.json atual (usado
     quando a sessão caiu com o bot rodando e o usuário importou cookies novos). Retorna
     (page, logado) — a Page é sempre válida (a antiga é fechada), mesmo se não logou.
+    `page` pode ser None (o bot já subiu sem sessão válida): aí usa `browser`.
     """
-    browser = page.context.browser
-    try:
-        page.context.close()
-    except Exception:
-        pass
+    if page is not None:
+        browser = page.context.browser
+        try:
+            page.context.close()
+        except Exception:
+            pass
     context = browser.new_context(storage_state=_load_storage_state())
     nova = context.new_page()
     nova.goto(sel.PROJECTS_LIST_URL, wait_until="networkidle")
     return nova, submitter.is_logged_in(nova)
 
 
-def open_authenticated_page(browser):
+def open_authenticated_page(browser, aviso_extra: str = ""):
     """
     Autentica a sessão do navegador de uma das duas formas:
     - Se existir data/auth_state.json (gerado por `python bot/import_cookies.py`, ou por
@@ -90,7 +92,8 @@ def open_authenticated_page(browser):
     - Senão, cai pro login automático por email/senha (bot/submitter.py), usando as
       variáveis NINETY_NINE_EMAIL/NINETY_NINE_PASSWORD do .env — mantido como fallback,
       mas o Turnstile deve rejeitar essa tentativa na prática.
-    Retorna a Page autenticada, ou None se não foi possível autenticar.
+    Retorna a Page autenticada, ou None se não foi possível autenticar. `aviso_extra` vai
+    no fim da notificação de falha (ex: o bot principal continua rodando e espera cookies).
     """
     if os.path.exists(AUTH_STATE_PATH):
         context = browser.new_context(storage_state=_load_storage_state())
@@ -105,7 +108,8 @@ def open_authenticated_page(browser):
             "do seu navegador comum, já logado) pra renovar a sessão."
         )
         log.error(detail)
-        notifier.notify_bot_status("auth_failed", detail)
+        context.close()
+        notifier.notify_bot_status("auth_failed", detail + aviso_extra)
         return None
 
     email = os.environ.get("NINETY_NINE_EMAIL")
@@ -117,14 +121,15 @@ def open_authenticated_page(browser):
             "CLAUDE.md) pra reaproveitar a sessão do seu navegador comum."
         )
         log.error(detail)
-        notifier.notify_bot_status("auth_failed", detail)
+        notifier.notify_bot_status("auth_failed", detail + aviso_extra)
         return None
 
     context = browser.new_context()
     page = context.new_page()
     if not submitter.login(page, email, password):
         detail = "Login por email/senha falhou (provavelmente bloqueado pelo Cloudflare Turnstile — ver CLAUDE.md)."
-        log.error(detail + " Encerrando.")
-        notifier.notify_bot_status("auth_failed", detail)
+        log.error(detail)
+        context.close()
+        notifier.notify_bot_status("auth_failed", detail + aviso_extra)
         return None
     return page

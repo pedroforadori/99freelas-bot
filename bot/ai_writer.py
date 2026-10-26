@@ -269,12 +269,13 @@ _PROVIDERS = {
 
 
 def generate_proposal_text(
-    project: dict, full_description: str, config: dict, variante: str = "padrao"
+    project: dict, full_description: str, config: dict, variante: str = "padrao", plataforma: str = "99Freelas"
 ) -> str | None:
     """
     Retorna o texto gerado, ou None se a API falhar ou o texto violar as regras de
     segurança — nesses casos o chamador (bot/proposal.py) deve cair pro template fixo.
     `variante` escolhe o estilo do texto (ver _TEXT_VARIANTS); desconhecida → "padrao".
+    `plataforma`: site citado no system prompt (ex: "Workana") — as regras são as mesmas.
     """
     if variante not in _TEXT_VARIANTS:
         log.warning("Estilo de texto '%s' desconhecido — usando 'padrao'.", variante)
@@ -291,7 +292,8 @@ def generate_proposal_text(
     skills = config.get("keywords_include", [])
     user_prompt = _build_user_prompt(project, full_description, skills)
 
-    text = generate_fn(user_prompt, model, system_prompt=_text_system_prompt(variante))
+    system_prompt = _text_system_prompt(variante).replace("99Freelas", plataforma)
+    text = generate_fn(user_prompt, model, system_prompt=system_prompt)
     if not text:
         log.warning("IA (%s) retornou texto vazio ou falhou.", provider_name)
         return None
@@ -311,9 +313,15 @@ _PRAZO_MAX_SANITY = 90
 
 
 def _build_price_user_prompt(
-    project: dict, full_description: str, lowest_bid: float | None = None, media_prazo: int | None = None
+    project: dict,
+    full_description: str,
+    lowest_bid: float | None = None,
+    media_prazo: int | None = None,
+    orcamento: str | None = None,
 ) -> str:
     mercado = ""
+    if orcamento:
+        mercado += f"Orçamento informado pelo cliente: {orcamento}\n"
     if lowest_bid:
         mercado += f"Valor médio das propostas concorrentes: R$ {lowest_bid:.2f}\n"
     if media_prazo:
@@ -334,12 +342,15 @@ def suggest_price_and_deadline(
     config: dict,
     lowest_bid: float | None = None,
     media_prazo: int | None = None,
+    orcamento: str | None = None,
+    plataforma: str = "99Freelas",
 ) -> tuple[float, int] | None:
     """
     Sugere (oferta, prazo_dias) via IA a partir do escopo do projeto — ver
     proposal.build_proposal. lowest_bid/media_prazo (média de valor/prazo das propostas
     concorrentes, quando o site já mostra) vão no prompt como referência de mercado
-    (estratégia "ia"); sem eles, a IA julga só pela descrição.
+    (estratégia "ia"); sem eles, a IA julga só pela descrição. `orcamento` (texto, ex:
+    "R$ 2.500 - 5.000") é a faixa do cliente quando o site mostra (Workana).
 
     Retorna None se a API falhar, a resposta não for um JSON válido no formato esperado,
     ou os valores caírem fora de uma faixa de sanidade ampla (não é um "piso de mercado",
@@ -356,9 +367,9 @@ def suggest_price_and_deadline(
 
     generate_fn, default_model = provider
     model = proposal_cfg.get("ia_model", default_model)
-    user_prompt = _build_price_user_prompt(project, full_description, lowest_bid, media_prazo)
+    user_prompt = _build_price_user_prompt(project, full_description, lowest_bid, media_prazo, orcamento)
 
-    raw = generate_fn(user_prompt, model, system_prompt=_PRICE_SYSTEM_PROMPT)
+    raw = generate_fn(user_prompt, model, system_prompt=_PRICE_SYSTEM_PROMPT.replace("99Freelas", plataforma))
     if not raw:
         log.warning("IA (%s) não retornou sugestão de preço/prazo.", provider_name)
         return None

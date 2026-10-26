@@ -14,7 +14,7 @@ from tests.conftest import EMAIL_MANUAL, FREELAS99, GITHUB
 
 def test_toda_fonte_registrada_e_completa():
     nomes = [s.name for s in registry.ALL_SOURCES]
-    assert nomes == ["99freelas", "github", "apinfo", "email_manual"]
+    assert nomes == ["99freelas", "github", "apinfo", "workana", "email_manual"]
     for source in registry.ALL_SOURCES:
         assert source.tag.startswith("<b>[") and source.tag.endswith("]</b>")
         codes = [f.code for f in source.editable_fields]
@@ -194,3 +194,60 @@ def test_notify_activity_com_e_sem_tag(telegram):
     notifier.notify_activity("oi", tag="<b>[X]</b>")
     notifier.notify_activity("sem tag")
     assert [p["text"] for p in telegram.of("sendMessage")] == ["<b>[X]</b> oi", "sem tag"]
+
+
+# --- Isolamento entre fontes no main.py ----------------------------------------------------------
+
+
+class _NaoInicia(_FonteFake):
+    def __init__(self, tentativas_ate_iniciar, erro=False):
+        super().__init__()
+        self.faltam, self.erro = tentativas_ate_iniciar, erro
+
+    def start(self, browser):
+        if self.faltam:
+            self.faltam -= 1
+            if self.erro:
+                raise RuntimeError("rede fora")
+            return False
+        return True
+
+
+@pytest.mark.parametrize("erro", [False, True])
+def test_fonte_que_nao_inicia_avisa_uma_vez_e_volta_depois(telegram, erro):
+    starter = main._SourceStarter(browser=None)
+    fonte = _NaoInicia(tentativas_ate_iniciar=3, erro=erro)
+    assert [starter.start(fonte) for _ in range(4)] == [False, False, False, True]
+    textos = [p["text"] for p in telegram.of("sendMessage")]
+    assert len(textos) == 2
+    assert "Fonte fora do ar" in textos[0] and "<b>[Fake]</b>" in textos[0]
+    assert "Fonte de volta" in textos[1]
+
+
+def test_aprovacao_de_fonte_fora_do_ar_fica_guardada(telegram, fake_source):
+    fake_source.run_cycle({})
+    approvals.record_decision("fk-1", "approved")
+    main.process_pending_approvals(fora_do_ar=frozenset({"fake"}))
+    assert fake_source.entregues == []
+    assert approvals.get_pending("fk-1")["decision"] == "approved"
+    main.process_pending_approvals()  # fonte voltou
+    assert fake_source.entregues == [("fk-1", "a", True)]
+
+
+def test_erro_no_tick_de_uma_fonte_nao_pula_as_outras(telegram):
+    class Quebrada(_FonteFake):
+        def tick(self, config):
+            raise RuntimeError("timeout no site")
+
+    class Ok(_FonteFake):
+        ticks = 0
+
+        def tick(self, config):
+            Ok.ticks += 1
+
+    class Dispatcher:
+        def poll(self):
+            raise RuntimeError("Telegram fora")
+
+    main.background_tick(Dispatcher(), [Quebrada(), Ok()], frozenset(), {})
+    assert Ok.ticks == 1

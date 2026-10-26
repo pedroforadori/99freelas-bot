@@ -11,10 +11,11 @@ from bot.sources.base import JobSource
 from bot.sources.email_manual.source import EmailManualSource
 from bot.sources.freelas99.source import Freelas99Source
 from bot.sources.github.source import GitHubSource
+from bot.sources.workana.source import WorkanaSource
 
 # A primeira é a padrão: entradas antigas de data/pending_approvals.json não têm "source"
 # (anteriores ao GitHub) e são todas do 99Freelas.
-ALL_SOURCES: list[JobSource] = [Freelas99Source(), GitHubSource(), ApinfoSource(), EmailManualSource()]
+ALL_SOURCES: list[JobSource] = [Freelas99Source(), GitHubSource(), ApinfoSource(), WorkanaSource(), EmailManualSource()]
 DEFAULT_SOURCE = ALL_SOURCES[0]
 
 _BY_NAME = {s.name: s for s in ALL_SOURCES}

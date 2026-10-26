@@ -17,6 +17,7 @@ data/github_jobs.json
 data/apinfo_jobs.json
 data/apinfo_debug/
 data/apinfo_state.json
+data/workana_*
 # Currículo/anexos dos e-mails de candidatura (github_jobs.email.anexo)
 data/*.pdf
 data/*.docx

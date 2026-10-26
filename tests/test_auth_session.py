@@ -36,7 +36,7 @@ def test_erro_nunca_derruba_o_ciclo(monkeypatch):
 
 # --- sessão derrubada pelo site com o bot rodando --------------------------------------------
 
-from bot import connections, scraper  # noqa: E402
+from bot import connections, notifier, scraper  # noqa: E402
 from bot.sources import registry  # noqa: E402
 
 FREELAS99 = registry.source_of({"source": "99freelas"})
@@ -53,7 +53,7 @@ def deslogado(api, monkeypatch):
         estado["listagens"] += 1
         return []
 
-    def reopen(page):
+    def reopen(page, browser=None):
         estado["reaberturas"] += 1
         return "page-nova", estado["logado"]
 
@@ -109,3 +109,26 @@ def test_aceita_export_cru_do_cookie_editor():
     estado = auth._load_storage_state()
     assert [c["name"] for c in estado["cookies"]] == ["JSESSIONID"]
     assert estado["cookies"][0]["expires"] == -1
+
+
+def test_boot_sem_sessao_nao_derruba_o_bot_e_volta_com_cookies_novos(api, telegram, deslogado, monkeypatch):
+    def abre(browser, aviso_extra=""):
+        notifier.notify_bot_status("auth_failed", "Sessão expirou." + aviso_extra)
+        return None
+
+    monkeypatch.setattr(auth, "open_authenticated_page", abre)
+    monkeypatch.setattr(FREELAS99, "page", None)
+    monkeypatch.setattr(FREELAS99, "_browser", None)
+    assert FREELAS99.start("browser") is True  # main.py não tira a fonte do ar
+    assert FREELAS99._sem_sessao is True
+    assert "continua rodando" in _status(telegram)[-1]
+
+    api.run_cycle({})
+    assert deslogado["listagens"] == 0  # sem sessão nem abre o site
+
+    deslogado["logado"] = True
+    monkeypatch.setattr(connections, "refresh", lambda page: None)
+    with open(auth.AUTH_STATE_PATH, "w", encoding="utf-8") as f:
+        json.dump({"cookies": [], "origins": []}, f)
+    api.run_cycle({})
+    assert FREELAS99.page == "page-nova" and FREELAS99._sem_sessao is False

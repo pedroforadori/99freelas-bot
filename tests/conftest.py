@@ -35,6 +35,8 @@ from bot.sources.freelas99 import auth as auth_99  # noqa: E402
 from bot.sources.freelas99 import views as views_99  # noqa: E402
 from bot.sources.github import client as github_jobs  # noqa: E402
 from bot.sources.github import views as views_gh  # noqa: E402
+from bot.sources.workana import auth as auth_wk  # noqa: E402
+from bot.sources.workana import client as workana_client  # noqa: E402
 from bot.telegram_dispatcher import TelegramDispatcher  # noqa: E402
 
 FREELAS99 = registry.source_of({"source": "99freelas"})
@@ -170,6 +172,9 @@ def _data_paths():
         (apinfo_client, "STATE_PATH", "apinfo_state.json"),
         (telegram_api, "_OFFSET_PATH", "telegram_offset.json"),
         (auth_99, "AUTH_STATE_PATH", "auth_state.json"),
+        (workana_client, "DATA_PATH", "workana_jobs.json"),
+        (workana_client, "DEBUG_DIR", "workana_debug"),
+        (auth_wk, "AUTH_STATE_PATH", "workana_auth_state.json"),
     ]
 
 

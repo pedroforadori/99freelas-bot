@@ -266,6 +266,23 @@ apinfo_jobs:
       Atenciosamente,
       {nome}
 
+# Workana (bot/sources/workana/): varre "TI e Programação", filtra e manda cada proposta
+# pro Telegram com "✅ Enviar proposta" / "❌ Recusar" — NUNCA envia sem o seu clique.
+# Sessão: exporte os cookies do workana.com (Cookie-Editor, já logado) e rode
+#   python bot/import_cookies.py --site workana caminho/do/export.json
+# Texto pela mesma IA/estilos/travas de `proposal` (ia_provider, texto_variantes, nota_extra).
+workana:
+  enabled: false
+  # Valor (o que o cliente vê; a comissão do Workana sai dele). Nunca abaixo do lance
+  # mínimo do site. "minimo_faixa": piso da faixa do cliente | "ia": sugestão da IA presa
+  # dentro da faixa. Sem faixa, usa a sugestão da IA. Editável no Telegram antes de enviar.
+  oferta: "minimo_faixa"
+  prazo_padrao_dias: 15     # se a IA não sugerir prazo
+  max_por_ciclo: 5          # pedidos de aprovação por varredura
+  # Filtro: herda max_project_age_minutes, keywords_include/exclude e budget_min/max do
+  # topo deste arquivo (categories NÃO — são nomes do 99Freelas). Sobrescreva aqui:
+  filtro: {}
+
 # E-mail manual pra recrutador (ex: e-mail achado no LinkedIn): escreva no chat do bot
 #   Roberta, Vaga Front End Sr., roberta@empresa.com.br
 #   Roberta Vaga Front End Sr. roberta@empresa.com.br   (sem vírgula: nome = 1ª palavra)

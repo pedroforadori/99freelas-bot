@@ -42,7 +42,7 @@ def load_config() -> dict:
         return yaml.safe_load(f) or {}
 
 
-def process_pending_approvals() -> None:
+def process_pending_approvals(fora_do_ar: frozenset[str] = frozenset()) -> None:
     """
     Resolve aprovações/rejeições já decididas no Telegram (decision gravada pelo
     TelegramDispatcher ANTES desta função rodar — ver bot/approvals.py). É aqui que o envio
@@ -54,10 +54,17 @@ def process_pending_approvals() -> None:
     Exceção num item (ex: Page.goto com timeout por queda de rede) não segura os outros nem
     o resto do loop interno: a decisão continua "approved" em disco e é retentada no próximo
     tick — queda de rede costuma ser passageira, então não vira "failed" na primeira.
+
+    `fora_do_ar`: nomes das fontes ativas cujo start() falhou (ver _SourceStarter). Os itens
+    delas ficam com a decisão gravada em disco, sem tentar entregar (a fonte nem tem
+    sessão/navegador pronto), e são resolvidos quando ela iniciar.
     """
     for entry in approvals.get_decided_unresolved():
+        source = registry.source_of(entry["project"])
+        if source.name in fora_do_ar:
+            continue
         try:
-            registry.source_of(entry["project"]).resolve_approval(entry)
+            source.resolve_approval(entry)
         except Exception as e:
             log.exception("Erro ao resolver a aprovação de %s (tenta de novo no próximo tick): %s",
                           entry["project_id"], e)
@@ -104,6 +111,64 @@ class _CycleGuard:
         self._errors[source.name] = 0
 
 
+class _SourceStarter:
+    """
+    Chama o start() de cada fonte ativa sem deixar uma derrubar as outras: antes, um start()
+    com False (ex: sessão expirada) encerrava o bot inteiro. A fonte que falha (False ou
+    exceção) fica fora da varredura/tick e é tentada de novo a cada ciclo de varredura —
+    ex: rede fora do ar na hora do boot. Notifica só na 1ª falha da sequência e quando ela
+    finalmente inicia (mesma ideia do _CycleGuard).
+    """
+
+    def __init__(self, browser):
+        self._browser = browser
+        self._falhou: set[str] = set()
+
+    def start(self, source: JobSource) -> bool:
+        try:
+            ok = source.start(self._browser)
+        except Exception as e:
+            log.exception("Erro ao iniciar a fonte %s: %s", source.name, e)
+            ok = False
+        if ok:
+            if source.name in self._falhou:
+                self._falhou.discard(source.name)
+                log.info("Fonte %s iniciou na nova tentativa.", source.name)
+                notifier.notify_bot_status("source_started", f"{source.tag} Iniciou na nova tentativa.")
+            return True
+        if source.name not in self._falhou:
+            self._falhou.add(source.name)
+            log.error("Fonte %s não iniciou — fica de fora e é tentada de novo a cada ciclo.", source.name)
+            notifier.notify_bot_status(
+                "source_disabled",
+                f"{source.tag} Não iniciou. As outras fontes continuam; tento de novo a cada ciclo. "
+                "Aprovações dela ficam guardadas e são enviadas quando ela voltar.",
+            )
+        return False
+
+
+def _protegido(descricao: str, fn) -> None:
+    """Uma etapa do loop interno: erro fica só no log e não pula as etapas seguintes."""
+    try:
+        fn()
+    except Exception as e:
+        # O warning já chega no Telegram via TelegramErrorHandler — categoria de falha
+        # diferente da varredura, não entra no contador de ciclos com erro.
+        log.exception("Erro em %s: %s", descricao, e)
+
+
+def background_tick(dispatcher, ativas: list[JobSource], fora_do_ar: frozenset[str], config: dict) -> None:
+    """
+    Uma volta do loop interno (entre varreduras): cliques do Telegram, aprovações decididas
+    e o tick() de cada fonte ativa — cada etapa isolada, pra um erro numa fonte (ex: timeout
+    no site dela) não fazer as outras perderem a vez.
+    """
+    _protegido("polling do Telegram", dispatcher.poll)
+    _protegido("aprovações pendentes", lambda: process_pending_approvals(fora_do_ar))
+    for source in ativas:
+        _protegido(f"tick de {source.name}", lambda: source.tick(config))
+
+
 class _ReloadRequested(Exception):
     def __init__(self, alterados: list[str]):
         super().__init__(", ".join(alterados))
@@ -132,9 +197,8 @@ def main() -> None:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=headless) if any(s.needs_browser for s in sources) else None
         try:
-            for source in sources:
-                if not source.start(browser):
-                    sys.exit(1)  # ex: sessão do 99Freelas expirada (a fonte já notificou)
+            starter = _SourceStarter(browser)
+            ativas = [s for s in sources if starter.start(s)]
 
             log.info("Bot iniciado. Ctrl+C para parar.")
             recarregados = os.environ.pop(hot_reload.RELOADED_ENV, None)
@@ -144,7 +208,8 @@ def main() -> None:
                 notifier.notify_bot_status("started")
             guard = _CycleGuard()
             while True:
-                for source in sources:
+                fora_do_ar = frozenset(s.name for s in sources if s not in ativas)
+                for source in ativas:
                     guard.run(source, config)
 
                 # Entre varreduras, fica de olho nas aprovações respondidas no Telegram numa
@@ -155,20 +220,15 @@ def main() -> None:
                 log.info("Aguardando até %.0fs pro próximo ciclo (checando aprovações a cada %ds)...",
                          next_scrape_at - time.time(), approval_poll_interval)
                 while time.time() < next_scrape_at:
-                    try:
-                        dispatcher.poll()
-                        process_pending_approvals()
-                        for source in sources:
-                            source.tick(config)
-                    except Exception as e:
-                        # Erros aqui ficam só no log (o warning já chega no Telegram via
-                        # TelegramErrorHandler) — categoria de falha diferente da varredura,
-                        # não entra no contador de ciclos com erro.
-                        log.exception("Erro ao processar aprovações pendentes/tarefas de fundo: %s", e)
+                    background_tick(dispatcher, ativas, fora_do_ar, config)
                     # Hot reload só aqui, entre ticks: nunca no meio de um envio/varredura.
                     if watcher and (alterados := watcher.check()):
                         raise _ReloadRequested(alterados)
-                    time.sleep(_poll_interval(sources, approval_poll_interval, urgent_poll_interval))
+                    time.sleep(_poll_interval(ativas, approval_poll_interval, urgent_poll_interval))
+
+                # Fontes que não iniciaram: nova tentativa uma vez por ciclo de varredura.
+                if fora_do_ar:
+                    ativas = [s for s in sources if s in ativas or starter.start(s)]
         except _ReloadRequested as reload:
             alterados = reload.alterados
         except KeyboardInterrupt:
