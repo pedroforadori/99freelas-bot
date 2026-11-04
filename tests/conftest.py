@@ -28,7 +28,7 @@ from bot import logger_setup  # noqa: E402
 logger_setup.get_logger = logging.getLogger
 
 from bot import ai_writer, approvals, connections, email_sender, manual_queue, messages  # noqa: E402
-from bot import main, notifier, storage, submitter, telegram_api, utils  # noqa: E402
+from bot import main, notifier, portfolio_context, storage, submitter, telegram_api, utils  # noqa: E402
 from bot.sources import registry  # noqa: E402
 from bot.sources.apinfo import client as apinfo_client  # noqa: E402
 from bot.sources.freelas99 import auth as auth_99  # noqa: E402
@@ -177,6 +177,8 @@ def _data_paths():
         (workana_client, "DATA_PATH", "workana_jobs.json"),
         (workana_client, "DEBUG_DIR", "workana_debug"),
         (auth_wk, "AUTH_STATE_PATH", "workana_auth_state.json"),
+        (portfolio_context, "CACHE_PATH", "portfolio_cache.json"),
+        (portfolio_context, "PORTFOLIO_DIR", "portfolio"),
     ]
 
 
@@ -217,7 +219,10 @@ def api(monkeypatch):
         github=github_jobs,
         patch_submitter=lambda name, fn: monkeypatch.setattr(submitter, name, fn),
         patch_email_send=lambda fn: monkeypatch.setattr(email_sender, "send", fn),
-        patch_ai_text=lambda fn: monkeypatch.setattr(ai_writer, "generate_proposal_text", fn),
+        patch_ai_text=lambda fn: monkeypatch.setattr(
+            ai_writer, "generate_proposal_text",
+            lambda *a, portfolio=None, nomes_a_omitir=(), **k: fn(*a, **k),
+        ),
         patch_fetch_issues=lambda fn: monkeypatch.setattr(github_jobs, "fetch_issues", fn),
     )
 

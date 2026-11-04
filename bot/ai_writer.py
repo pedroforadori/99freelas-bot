@@ -35,6 +35,21 @@ _SYSTEM_PROMPT_BASE = (
     "termos de arquitetura (ex: React, Node.js, SOLID, DDD, API, JWT, GraphQL) — o cliente "
     "geralmente é leigo em tecnologia. Fale do problema dele e de como você resolve, em "
     "linguagem simples e acessível, não da stack técnica.\n"
+    # Itens que o cliente pede pra proposta informar (pedido do usuário, 2026-10-28 — caso
+    # real: "Na proposta, informar: experiência, prazo, valor total, custos mensais").
+    "- Se a descrição pedir que a proposta informe itens (ex: 'Na proposta, informar:', "
+    "'Informe na proposta...'), responda CADA item pedido, de forma curta, no meio do texto. "
+    "Valor total e prazo pedidos: diga apenas, numa frase, que estão informados nos campos "
+    "desta proposta — sem números (é a única exceção às duas regras acima). Experiência e "
+    "custos seguem as regras abaixo.\n"
+    "- Experiência pedida: use SOMENTE o material de portfólio enviado junto com o projeto "
+    "(se não vier material, diga só que dá para ver trabalhos no portfólio do meu perfil). "
+    "Resuma em 1 ou 2 frases o que for parecido com este projeto, em linguagem simples, e "
+    "termine dizendo que dá para ver mais no portfólio do meu perfil. NUNCA cite nome de "
+    "empresa, banco, marca ou cliente.\n"
+    "- Custos mensais pedidos (hospedagem, serviços, APIs): dê faixas realistas em R$, cada "
+    "valor na mesma frase da unidade ('por mês' ou 'por <unidade>', ex: 'por música gerada'), "
+    "citando o tipo de serviço sem marca. Nunca use R$ para o valor do projeto.\n"
 )
 
 # Estilo do texto — sorteado por proposta (ver proposal._sortear_variante_texto) pra
@@ -196,13 +211,60 @@ _PRICE_SYSTEM_PROMPT = (
 )
 
 
-def check_text_safety(text: str) -> str | None:
+# Custo mensal pedido pelo cliente (pede_custos_mensais): R$ só passa na mesma frase de uma
+# unidade de recorrência/uso — o valor total do projeto continua sempre barrado.
+_UNIDADE_CUSTO = re.compile(
+    r"por m[eê]s|/\s*m[eê]s|mensa(?:l|is)|ao m[eê]s"
+    r"|por (?:cada )?(?:m[uú]sicas?|pedidos?|usos?|gera[cç](?:ão|ões)|usu[aá]rios?|acessos?|mil|minutos?|requisi[cç](?:ão|ões))",
+    re.I,
+)
+# "R$ 50" ou "50 reais" (a IA às vezes escreve por extenso).
+_DINHEIRO = re.compile(r"r\$|\d\s*(?:mil\s+)?reais\b", re.I)
+# Pedido de custo recorrente: "custos mensais de APIs/hospedagem", e também "valor da
+# mensalidade" / "valor mensal" / "custo de manutenção" (caso real 795639, 2026-11-02 — sem
+# isso a resposta da IA com a hospedagem "R$ 30 a R$ 70 por mês" era barrada).
+_PEDE_CUSTO = re.compile(
+    r"\bcustos?\b[^.\n]{0,80}\b(?:mensa(?:l|is)|por m[eê]s|hospedagem|apis?|servidor(?:es)?|manuten[cç][aã]o)\b"
+    r"|\bmensalidades?\b|\bvalor(?:es)? mensa(?:l|is)\b",
+    re.I,
+)
+_PEDE_EXPERIENCIA = re.compile(
+    r"\b(?:experi[eê]ncia|projetos? (?:semelhantes|parecidos|similares|anteriores)|trabalhos? (?:anteriores|semelhantes|parecidos)|portf[oó]lio)\b",
+    re.I,
+)
+
+
+def pede_custos_mensais(descricao: str | None) -> bool:
+    """A descrição pede custos mensais/recorrentes (hospedagem, APIs) na proposta?"""
+    return bool(_PEDE_CUSTO.search(descricao or ""))
+
+
+def pede_experiencia(descricao: str | None) -> bool:
+    """A descrição pede experiência/projetos semelhantes/portfólio? Só aí o material vai pro prompt."""
+    return bool(_PEDE_EXPERIENCIA.search(descricao or ""))
+
+
+def _trechos(text: str) -> list[str]:
+    """
+    Trechos de frase pra checar cada R$ com a sua unidade: quebra em . ! ? ; : , e " e "
+    (só seguidos de espaço — "R$ 1.200,00" fica inteiro), mas não em " e R$"/" a R$" de uma
+    faixa ("R$ 50 a R$ 100 por mês"). Assim "valor total R$ 1.850 e hospedagem R$ 50 por mês"
+    vira dois trechos e o primeiro é barrado.
+    """
+    return re.split(r"[.!?;:,](?=\s|$)|\n+|\s(?:e|mais)\s(?!R\$)", text)
+
+
+def check_text_safety(text: str, custos_mensais: bool = False, nomes_a_omitir=()) -> str | None:
     """
     Retorna o motivo se o texto violar alguma regra de segurança, ou None se estiver OK.
     Pública (sem `_`) porque proposal.py também usa isso como checagem final no texto que
     vai pro formulário, seja ele gerado por IA ou vindo do template fixo em config.yaml —
     nunca confiar só na instrução do prompt, nem só em "não esquecer" de configurar certo
     o template fixo.
+
+    custos_mensais: o cliente pediu custos mensais (pede_custos_mensais) — R$ passa só na
+    mesma frase de "por mês"/"por <unidade>". nomes_a_omitir: empresas do portfólio que
+    nunca aparecem no texto (portfolio_context.nomes_a_omitir).
     """
     if _EMAIL_PATTERN.search(text):
         return "contém um e-mail"
@@ -210,18 +272,32 @@ def check_text_safety(text: str) -> str | None:
         return "contém um link/URL"
     if _PHONE_PATTERN.search(text):
         return "contém um possível número de telefone"
-    if "r$" in text.lower():
-        return "menciona valor (R$)"
+    if _DINHEIRO.search(text):
+        if not custos_mensais:
+            return "menciona valor (R$)"
+        if any(_DINHEIRO.search(t) and not _UNIDADE_CUSTO.search(t) for t in _trechos(text)):
+            return "menciona valor (R$) fora de custo mensal/por uso"
+    for nome in nomes_a_omitir:
+        if re.search(rf"(?<!\w){re.escape(nome)}(?!\w)", text, re.I):
+            return f"cita empresa do portfólio ({nome})"
     if len(text) > _MAX_CHARS:
         return f"texto muito longo ({len(text)} caracteres)"
     return None
 
 
-def _build_user_prompt(project: dict, full_description: str, skills: list) -> str:
+def _build_user_prompt(
+    project: dict, full_description: str, skills: list, portfolio: str | None = None, nomes_a_omitir=()
+) -> str:
+    extra = ""
+    if pede_experiencia(full_description):
+        extra += f"Material do meu portfólio (para responder experiência):\n{portfolio or '(sem material)'}\n\n"
+        if nomes_a_omitir:
+            extra += f"Nomes que NUNCA podem aparecer no texto: {', '.join(nomes_a_omitir)}\n\n"
     return (
         f"Projeto: {project.get('title', '')}\n\n"
         f"Descrição completa do projeto:\n{full_description}\n\n"
         f"Minhas habilidades/áreas de atuação: {', '.join(skills) if skills else '(não informado)'}\n\n"
+        f"{extra}"
         "Escreva a proposta seguindo todas as regras do system prompt."
     )
 
@@ -299,7 +375,13 @@ _PROVIDERS = {
 
 
 def generate_proposal_text(
-    project: dict, full_description: str, config: dict, variante: str = "padrao", plataforma: str = "99Freelas"
+    project: dict,
+    full_description: str,
+    config: dict,
+    variante: str = "padrao",
+    plataforma: str = "99Freelas",
+    portfolio: str | None = None,
+    nomes_a_omitir=(),
 ) -> str | None:
     """
     Retorna o texto gerado, ou None se a API falhar ou o texto violar as regras de
@@ -320,20 +402,43 @@ def generate_proposal_text(
     generate_fn, default_model = provider
     model = proposal_cfg.get("ia_model", default_model)
     skills = config.get("keywords_include", [])
-    user_prompt = _build_user_prompt(project, full_description, skills)
+    user_prompt = _build_user_prompt(project, full_description, skills, portfolio, nomes_a_omitir)
 
     system_prompt = _text_system_prompt(variante).replace("99Freelas", plataforma)
-    text = generate_fn(user_prompt, model, system_prompt=system_prompt)
-    if not text:
-        log.warning("IA (%s) retornou texto vazio ou falhou.", provider_name)
-        return None
+    custos_mensais = pede_custos_mensais(full_description)
+    # Um texto barrado pela checagem não pode matar a proposta: no envio automático, template
+    # fixo = não envia (caso real 2026-11-02: 3 propostas perdidas por um "R$ ... por mês" que
+    # a IA pôs por conta própria). Tenta de novo dizendo o motivo; a checagem continua igual.
+    prompt = user_prompt
+    for tentativa in range(1, _TENTATIVAS_TEXTO + 1):
+        text = generate_fn(prompt, model, system_prompt=system_prompt)
+        if not text:
+            log.warning("IA (%s) retornou texto vazio ou falhou.", provider_name)
+            return None
 
-    violation = check_text_safety(text)
-    if violation:
-        log.warning("Texto gerado por IA rejeitado (%s) — caindo pro template fixo.", violation)
-        return None
+        violation = check_text_safety(text, custos_mensais, nomes_a_omitir)
+        if not violation:
+            return text
+        log.warning("Texto gerado por IA rejeitado (%s) — tentativa %d de %d. Trecho: %s",
+                    violation, tentativa, _TENTATIVAS_TEXTO, _trecho_violacao(text))
+        prompt = (
+            f"{user_prompt}\n\nATENÇÃO: a versão anterior foi recusada porque {violation}. "
+            "Reescreva sem isso — nenhum valor em R$, contato, link ou nome proibido."
+        )
 
-    return text
+    log.warning("Texto gerado por IA rejeitado em todas as tentativas — caindo pro template fixo.")
+    return None
+
+
+_TENTATIVAS_TEXTO = 3
+
+
+def _trecho_violacao(text: str) -> str:
+    """Pedaço do texto em volta do primeiro R$ (pro log mostrar o que a IA escreveu)."""
+    m = _DINHEIRO.search(text)
+    if not m:
+        return text[:120].replace("\n", " ")
+    return text[max(0, m.start() - 60):m.end() + 60].replace("\n", " ")
 
 
 _PRICE_MIN_SANITY = 20.0

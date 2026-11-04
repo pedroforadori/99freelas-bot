@@ -13,6 +13,7 @@ data/pending_approvals.json
 data/telegram_offset.json
 data/manual_queue.json
 data/portfolio/
+data/portfolio_cache.json
 data/github_jobs.json
 data/apinfo_jobs.json
 data/apinfo_debug/

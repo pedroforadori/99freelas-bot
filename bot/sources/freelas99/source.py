@@ -11,10 +11,10 @@ import re
 import time
 from datetime import datetime, timedelta
 
-from bot import ai_writer, approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter, telegram_api
+from bot import approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.proposal import OFERTA_MINIMA, com_nome_do_cliente, describe_valor, oferta_minima, valor_manual
+from bot.proposal import OFERTA_MINIMA, com_nome_do_cliente, describe_valor, gerar_texto_ia, oferta_minima, valor_manual
 from bot.sources.base import Callback, CallbackRoute, EditableField, JobSource
 from bot.sources.freelas99 import auth, views
 from bot.storage import already_applied, register_application
@@ -704,7 +704,7 @@ class Freelas99Source(JobSource):
         variante = proposal.get("texto_variante")
         if variante in (None, "template"):
             variante = "padrao"
-        texto = ai_writer.generate_proposal_text(entry["project"], full_description, cb.config, variante=variante)
+        texto = gerar_texto_ia(entry["project"], full_description, cb.config, variante)
         if not texto:
             cb.answer("IA falhou de novo. Tente mais tarde ou aprove com o texto atual.")
             return

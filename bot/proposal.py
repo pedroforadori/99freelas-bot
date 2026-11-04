@@ -2,7 +2,7 @@ import math
 import random
 import re
 
-from bot import ai_writer
+from bot import ai_writer, portfolio_context
 from bot.logger_setup import get_logger
 from bot.utils import format_currency_br
 
@@ -122,6 +122,18 @@ def _prazo_abaixo_da_media(media_prazo: int, proposal_cfg: dict) -> int:
     return max(1, round(media_prazo * (1 - desconto / 100)))
 
 
+def gerar_texto_ia(project: dict, full_description: str, config: dict, variante: str) -> str | None:
+    """
+    generate_proposal_text com o material do portfólio quando o cliente pede experiência
+    (2026-10-28) — também usado pelo retry de texto via IA (Freelas99Source._on_retry_ia_text).
+    """
+    portfolio = portfolio_context.material_portfolio(config) if ai_writer.pede_experiencia(full_description) else None
+    return ai_writer.generate_proposal_text(
+        project, full_description, config, variante=variante,
+        portfolio=portfolio, nomes_a_omitir=portfolio_context.nomes_a_omitir(config),
+    )
+
+
 def _build_texto(
     project: dict, config: dict, oferta: float, prazo_dias: int, full_description: str | None
 ) -> tuple[str, bool, str]:
@@ -140,7 +152,7 @@ def _build_texto(
     texto_ia_falhou = False
     if modo == "ia" and full_description:
         variante = _sortear_variante_texto(proposal_cfg)
-        gerado = ai_writer.generate_proposal_text(project, full_description, config, variante=variante)
+        gerado = gerar_texto_ia(project, full_description, config, variante)
         if gerado:
             return gerado, False, variante
         log.warning("Geração via IA indisponível/rejeitada para '%s' — usando template fixo.", project.get("title"))
@@ -234,8 +246,13 @@ def _finalizar_texto(
     # generate_proposal_text, mas o template fixo de config.yaml nunca passava por isso —
     # essa é a rede de segurança que garante que nem um template mal configurado consiga
     # colocar contato/valor/prazo dentro do texto da proposta).
+    # R$ de custo mensal só quando o cliente pediu (full_description); empresas do portfólio nunca.
     texto = normalizar_para_o_site(texto)
-    violation = ai_writer.check_text_safety(texto)
+    violation = ai_writer.check_text_safety(
+        texto,
+        custos_mensais=ai_writer.pede_custos_mensais(full_description),
+        nomes_a_omitir=portfolio_context.nomes_a_omitir({"proposal": proposal_cfg}),
+    )
     if violation:
         log.warning(
             "Texto final da proposta pra '%s' violou regra de segurança (%s) — usando "
@@ -348,7 +365,7 @@ def build_proposal(
 
     texto, texto_ia_falhou, texto_variante = _build_texto(project, config, oferta, prazo_dias, full_description)
 
-    texto, substituido = _finalizar_texto(texto, project, proposal_cfg)
+    texto, substituido = _finalizar_texto(texto, project, proposal_cfg, full_description)
     if substituido:
         texto_variante = "template"
 
