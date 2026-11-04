@@ -137,6 +137,36 @@ _TEXT_VARIANTS = {
         "a citou na descrição.\n"
         "- Use só hífen comum \"-\", nunca travessão.\n"
     ),
+    # Texto que puxa conversa (pedido do usuário, 2026-10-26) — único ligado no config.yaml;
+    # "blocos" fica com peso 0. O valor é citado só como estimativa, SEM número (o R$ continua
+    # barrado por check_text_safety).
+    "consultivo": (
+        "- Escreva 5 blocos curtos, nesta ordem, separados por uma linha em branco, sem "
+        "títulos nem rótulos:\n"
+        "  1. Apenas \"Olá, tudo bem?\".\n"
+        "  2. Resumo do que pode ser feito para atender o projeto no escopo atual: uma frase "
+        "curta e de 2 a 4 itens com \"-\", falando da solução e das entregas, em linguagem simples.\n"
+        "  3. Uma ou duas frases dizendo que o valor enviado nesta proposta é uma estimativa "
+        "pelo escopo atual, e que com as respostas às dúvidas abaixo dá para confirmar ou "
+        "ajustar. Sem citar número, valor em reais nem prazo.\n"
+        "  4. De 2 a 3 dúvidas com \"-\", simples e fáceis de responder por alguém leigo, "
+        "sobre o que falta na descrição e muda o escopo ou o valor (ex: quantidade de "
+        "páginas ou telas, se já tem textos e imagens, se precisa de um painel para editar o "
+        "conteúdo). Nunca faça perguntas técnicas e nunca pergunte algo que a descrição já responde.\n"
+        "  5. Uma frase curta convidando o cliente a responder para seguirmos.\n"
+        "- NÃO repita nem parafraseie a descrição do cliente (nada de \"você precisa de...\", "
+        "\"entendi que você quer...\"); vá direto ao que você vai fazer.\n"
+        "- No máximo 900 caracteres no total; projeto grande ou com muitos requisitos: até 1100; "
+        "quando o cliente pede itens na proposta, até 1500.\n"
+        "- Proibido: \"entendi perfeitamente\", \"tenho grande interesse\", \"transformar sua "
+        "ideia\", \"100% pronto\", \"totalmente testado\", ou prometer o que não está na descrição.\n"
+        "- Não cite experiência, anos de carreira, clientes anteriores nem portfólio — exceto "
+        "quando o cliente pedir experiência na proposta: aí responda logo depois do bloco 2.\n"
+        "- Itens pedidos pelo cliente (custos, valor total, prazo) entram no bloco 3.\n"
+        "- Exceção à regra de tecnologias acima: só cite uma tecnologia se o próprio cliente "
+        "a citou na descrição.\n"
+        "- Use só hífen comum \"-\", nunca travessão.\n"
+    ),
 }
 TEXT_VARIANTS = tuple(_TEXT_VARIANTS)
 

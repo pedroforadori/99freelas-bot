@@ -61,6 +61,7 @@ TEXTO_VARIANTE_LABELS = {
     "conversa": "conversa informal",
     "estruturado": "estruturado (cumprimento → solução → proposta)",
     "blocos": "5 blocos (resultado → etapas → portfólio → convite)",
+    "consultivo": "consultivo (resumo → valor estimado → dúvidas)",
     "template": "template fixo do config.yaml",
 }
 

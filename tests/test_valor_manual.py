@@ -179,6 +179,29 @@ def test_texto_blocos_usa_prompt_proprio(monkeypatch):
     assert "portfólio do meu perfil" in prompts[0]
 
 
+# --- texto consultivo (resumo -> valor estimado -> duvidas) ------------------------------
+
+
+def test_sorteio_so_com_consultivo():
+    cfg = {"texto_variantes": {"consultivo": 1, "blocos": 0}}
+    assert {proposal_mod._sortear_variante_texto(cfg) for _ in range(30)} == {"consultivo"}
+
+
+def test_texto_consultivo_usa_prompt_proprio(monkeypatch):
+    prompts = []
+
+    def fake_gemini(user_prompt, model, system_prompt=None):
+        prompts.append(system_prompt)
+        return "Olá, tudo bem?\n\nPosso fazer:\n- Etapa 1\n\nO valor é uma estimativa.\n\n- Já tem os textos?"
+
+    monkeypatch.setitem(ai_writer._PROVIDERS, "gemini", (fake_gemini, "x"))
+    ai_writer.generate_proposal_text(project_99(), "Descrição", CONFIG, variante="consultivo")
+    assert prompts == [ai_writer._text_system_prompt("consultivo")]
+    assert prompts[0].startswith(ai_writer._SYSTEM_PROMPT_BASE)
+    assert "estimativa" in prompts[0]
+    assert "portfólio do meu perfil" not in ai_writer._TEXT_VARIANTS["consultivo"]
+
+
 def test_valor_solto_sem_reply_explica(api, telegram, pending_manual):
     telegram.push_message("300 5")
     api.poll(CONFIG)
