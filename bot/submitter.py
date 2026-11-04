@@ -3,8 +3,9 @@ import re
 from playwright.sync_api import Error as PlaywrightError, Page, TimeoutError as PlaywrightTimeoutError
 
 from bot.sources.freelas99 import views
+from bot import ai_writer
 from bot import site_selectors as sel
-from bot.filter import excluded_keyword
+from bot.filter import anuncio_de_freelancer, excluded_keyword, fora_da_area, ignora_anuncios, ignora_fora_da_area
 from bot.logger_setup import get_logger
 from bot.proposal import OFERTA_MINIMA, build_proposal, normalizar_para_o_site, valor_manual
 from bot.utils import format_currency_br, parse_currency
@@ -29,6 +30,12 @@ PROMOCAO_INDISPONIVEL = "outro freelancer já promoveu antes"
 # COMPLETA (a listagem só mostra um trecho) contém palavra de keywords_exclude — a varredura
 # registra como ignorado pelo filtro, não como falha.
 EXCLUIDO_PELO_FILTRO = "descrição completa contém palavra-chave excluída"
+# Mesmo tratamento: "projeto" que é anúncio de freelancer (filter.anuncio_de_freelancer +
+# ai_writer.classify_project), não pedido de cliente.
+ANUNCIO_DE_FREELANCER = "parece anúncio de freelancer, não pedido de cliente"
+# Idem: projeto fora da área — design, vetor, vídeo, protótipo sem programar (filter.fora_da_area
+# + ai_writer.classify_project).
+FORA_DA_AREA = "fora da área (não envolve programação)"
 
 
 def _finish(
@@ -90,6 +97,36 @@ def _read_project_title(page: Page, url: str) -> str:
 
     slug = re.sub(r"-\d+$", "", url.rstrip("/").rsplit("/", 1)[-1])
     return slug.replace("-", " ").capitalize() or url
+
+
+def _triagem(project: dict, full_description: str | None, config: dict) -> str | None:
+    """
+    Motivo completo pra ignorar o projeto (ANUNCIO_DE_FREELANCER / FORA_DA_AREA), ou None.
+    Regras na descrição COMPLETA (o card só tem um trecho) e, se não pegarem, UMA chamada à
+    IA cobrindo as duas checagens que tiverem `usar_ia` ligado.
+    """
+    anuncios, area = ignora_anuncios(config), ignora_fora_da_area(config)
+    texto = full_description or project.get("description")
+    if anuncios:
+        motivo = anuncio_de_freelancer(project.get("title"), texto)
+        if motivo:
+            return f"{ANUNCIO_DE_FREELANCER}: {motivo}"
+    if area:
+        motivo = fora_da_area(project.get("title"), texto)
+        if motivo:
+            return f"{FORA_DA_AREA}: {motivo}"
+    ia_anuncio = anuncios and (config.get("anuncios_de_freelancer") or {}).get("usar_ia")
+    ia_area = area and (config.get("fora_da_area") or {}).get("usar_ia")
+    if not full_description or not (ia_anuncio or ia_area):
+        return None
+    triagem = ai_writer.classify_project(project, full_description, config)
+    if not triagem:
+        return None
+    if ia_anuncio and triagem["anuncio"]:
+        return f"{ANUNCIO_DE_FREELANCER}: a IA classificou como anúncio"
+    if ia_area and not triagem["programacao"]:
+        return f"{FORA_DA_AREA}: a IA classificou como trabalho sem programação"
+    return None
 
 
 def _button_reappears(page: Page, timeout: int = 5000) -> bool:
@@ -159,7 +196,8 @@ def prepare_proposal(
     varredura com proposal.aguardar_media (ver Freelas99Source.run_cycle).
 
     check_exclude: se True, aplica keywords_exclude também na descrição completa e devolve
-    (None, "EXCLUIDO_PELO_FILTRO: '<palavra>'") antes de chamar qualquer IA. Só a varredura
+    (None, "EXCLUIDO_PELO_FILTRO: '<palavra>'") antes de chamar qualquer IA; depois, a triagem
+    de anúncio de freelancer / fora da área (_triagem). Só a varredura
     usa — link colado no Telegram não passa pelo filtro.
     """
     if valor_manual(config):
@@ -184,6 +222,9 @@ def prepare_proposal(
         kw = excluded_keyword(f"{project.get('title', '')} {full_description or ''}", config)
         if kw:
             return None, f"{EXCLUIDO_PELO_FILTRO}: '{kw}'"
+        motivo = _triagem(project, full_description, config)
+        if motivo:
+            return None, motivo
 
     try:
         # "Enviar proposta" navega pra uma página separada (/project/bid/...), não é

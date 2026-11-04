@@ -254,7 +254,7 @@ class Freelas99Source(JobSource):
             proposal, reason = submitter.prepare_proposal(
                 self.page, project, config, require_average=aguardar_media, check_exclude=True
             )
-            if reason.startswith(submitter.EXCLUIDO_PELO_FILTRO):
+            if reason.startswith((submitter.EXCLUIDO_PELO_FILTRO, submitter.ANUNCIO_DE_FREELANCER, submitter.FORA_DA_AREA)):
                 log.info("Ignorado: '%s' — %s", project["title"], reason)
                 self.notify(f"🚫 Ignorado: {esc(project['title'])}\n{esc(reason)}")
                 register_application(project["id"], project["title"], status="skipped_duplicate", detail=reason)

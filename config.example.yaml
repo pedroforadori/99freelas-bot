@@ -22,6 +22,20 @@ keywords_include: []
 #   ["e-commerce", "ecommerce", "loja virtual", "loja online", "woocommerce", "shopify", "nuvemshop"]
 keywords_exclude: []
 
+# "Projeto" que é outro freelancer anunciando o próprio serviço ("Me chamo X e trabalho
+# com...", título "Desenvolvedora Web") — ignorado na varredura, sem proposta. Link colado no
+# Telegram não passa por isso.
+anuncios_de_freelancer:
+  ignorar: true   # regras no código (filter.anuncio_de_freelancer); sem a seção = true
+  usar_ia: true   # confere com a IA os que passarem nas regras (1 chamada curta por projeto); sem a seção = false
+
+# Projeto fora da área — design gráfico, vetorização, logotipo, vídeo, protótipo de telas sem
+# programar. Regra só exclui com termo de design e nenhum de desenvolvimento ("tenho o
+# logotipo, quero o site" passa); a IA confere o resto, na mesma chamada dos anúncios.
+fora_da_area:
+  ignorar: true   # regras no código (filter.fora_da_area); sem a seção = true
+  usar_ia: true   # sem a seção = false
+
 # Orçamento mínimo aceito, em R$. Deixe null pra não filtrar por mínimo.
 budget_min: null
 

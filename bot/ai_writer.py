@@ -396,6 +396,50 @@ def suggest_price_and_deadline(
     return round(oferta, 2), prazo_dias
 
 
+_CLASSIFY_SYSTEM_PROMPT = (
+    "Você faz a triagem de textos publicados como 'projeto' no 99Freelas, um site onde clientes "
+    "publicam trabalhos para contratar freelancers. O freelancer que vai ler é DESENVOLVEDOR DE "
+    "SOFTWARE (sites, sistemas, aplicativos, automações, integrações). Responda duas coisas:\n"
+    "1. tipo: 'pedido' se alguém quer contratar um trabalho; 'anuncio' se é um profissional "
+    "oferecendo o próprio serviço (se apresenta, lista o que faz, convida a contratá-lo). "
+    "Na dúvida, 'pedido'.\n"
+    "2. programacao: true se o trabalho exige escrever código (criar ou mexer em site, sistema, "
+    "app, automação, integração, planilha com script etc.). Logotipo, layout, arte ou protótipo "
+    "que o cliente JÁ TEM e quer transformar em site/app conta como true. false se o trabalho é "
+    "só criar ou editar arte, vetor, logotipo, ilustração, identidade visual, vídeo, foto, texto, "
+    "ou só desenhar telas/protótipo (ex: no Figma) sem implementar. Na dúvida, true.\n"
+    'Responda APENAS com um objeto JSON válido, sem markdown: {"tipo": "pedido", "programacao": true}.'
+)
+
+
+def classify_project(project: dict, full_description: str, config: dict) -> dict | None:
+    """
+    Triagem do projeto pela IA numa chamada só: {"anuncio": bool, "programacao": bool}.
+    1ª camada são as regras de filter.py (anuncio_de_freelancer, fora_da_area); esta confere os
+    que passaram. None se a IA falhar ou responder fora do formato — o chamador segue normal
+    (na dúvida, nunca perde projeto).
+    """
+    proposal_cfg = config.get("proposal", {})
+    provider = _PROVIDERS.get(proposal_cfg.get("ia_provider", "anthropic"))
+    if not provider:
+        return None
+    generate_fn, default_model = provider
+    user_prompt = f"Título: {project.get('title', '')}\n\nDescrição:\n{full_description}"
+    raw = generate_fn(user_prompt, proposal_cfg.get("ia_model", default_model), system_prompt=_CLASSIFY_SYSTEM_PROMPT)
+    if not raw:
+        return None
+    cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        data = json.loads(cleaned)
+        tipo, programacao = data["tipo"], data["programacao"]
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        log.warning("Resposta da IA na triagem do projeto fora do formato (%s): %r", e, raw[:200])
+        return None
+    if tipo not in ("pedido", "anuncio") or not isinstance(programacao, bool):
+        return None
+    return {"anuncio": tipo == "anuncio", "programacao": programacao}
+
+
 PORTFOLIO_TITULO_MAX = 50  # maxlength de #titulo no formulário de portfólio do 99Freelas
 PORTFOLIO_DESCRICAO_MAX = 400  # maxlength de #descricao
 
