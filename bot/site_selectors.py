@@ -34,6 +34,10 @@ MESSAGES_API_SEND = "https://www.99freelas.com.br/services/user/enviarMensagemCo
 # O "Excluir" de cada mensagem no chat do site: POST .../<idMensagem>?deletar=true (false desfaz).
 MESSAGES_API_DELETE = "https://www.99freelas.com.br/services/user/deletarMensagemConversa/{id}"
 CONVERSATION_URL = "https://www.99freelas.com.br/messages/inbox/{id}"
+# Anexo de mensagem: cada item de "arquivos" traz idPessoa/token/nomeUrl/extensao (e "nome",
+# o nome original). Montado como ServiceUtils.getArquivoConversaURL do site (FILE_S3_BASE_URL
+# + "/messages/..."); CDN pública — baixa sem cookies (confirmado 2026-10-27 com um .md real).
+MESSAGES_ATTACHMENT_URL = "https://duqxk0v9olda1.cloudfront.net/messages/{idPessoa}/{token}/{nomeUrl}.{extensao}"
 # Página do projeto a partir do id da conversa (idProjeto): o site só olha o número no fim,
 # o texto antes é livre (confirmado 2026-10-20: /project/x-787857 abre o projeto 787857).
 PROJECT_URL_BY_ID = "https://www.99freelas.com.br/project/{slug}-{id}"

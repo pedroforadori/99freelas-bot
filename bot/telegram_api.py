@@ -113,6 +113,29 @@ def send_with_keyboard(text: str, reply_markup: dict | None) -> int | None:
     return result.get("message_id") if isinstance(result, dict) else None
 
 
+def send_document(filename: str, content: bytes, caption: str = "") -> int | None:
+    """Manda um arquivo (caption em HTML, até 1024 caracteres) e devolve o message_id (None se falhar)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if not token or not chat_id():
+        log.warning("TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID não configurados — arquivo não enviado.")
+        return None
+    try:
+        resp = requests.post(
+            TELEGRAM_API_URL.format(token=token, method="sendDocument"),
+            data={"chat_id": chat_id(), "caption": caption, "parse_mode": "HTML"},
+            files={"document": (filename, content)},
+            timeout=30,
+        )
+        data = resp.json()
+        if not data.get("ok"):
+            log.warning("Chamada Telegram sendDocument falhou: %s", data)
+            return None
+        return data["result"].get("message_id")
+    except Exception as e:
+        log.warning("Erro na chamada Telegram sendDocument: %s", e)
+        return None
+
+
 def edit_text(message_id: int, text: str, reply_markup: dict | None) -> None:
     """Sem reply_markup, o Telegram tira os botões da mensagem."""
     payload = {

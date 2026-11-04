@@ -7,3 +7,6 @@ google-genai==2.23.0
 requests==2.34.2
 google-play-scraper==1.2.7
 beautifulsoup4==4.12.3
+pypdf==6.21.3
+python-docx==1.2.0
+openpyxl==3.1.5

@@ -703,3 +703,76 @@ def generate_chat_reply(ctx: dict, config: dict) -> dict | None:
         }
     log.warning("Resposta de chat da IA fora do formato: %r", raw[:200])
     return None
+
+
+# --- Leitura de anexo/imagem pro pacote do Claude (ver attachments.py) --------------------
+
+_DESCRIBE_PROMPT = (
+    "Este arquivo foi enviado por um cliente numa conversa sobre um projeto de freelancer. "
+    "Transcreva todo o texto visível e descreva de forma objetiva o que ele mostra (tela de "
+    "sistema, layout, referência visual, diagrama, tabela...). Responda em português, em "
+    "texto puro, sem comentários seus nem sugestões."
+)
+
+
+def _describe_with_anthropic(conteudo: bytes, mime: str, model: str) -> str | None:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        log.info("ANTHROPIC_API_KEY não configurada — não dá pra ler o anexo via IA.")
+        return None
+    import base64
+
+    from anthropic import Anthropic
+
+    tipo = "document" if mime == "application/pdf" else "image"
+    bloco = {"type": tipo, "source": {"type": "base64", "media_type": mime, "data": base64.b64encode(conteudo).decode()}}
+    client = Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model=model,
+        max_tokens=1500,
+        messages=[{"role": "user", "content": [bloco, {"type": "text", "text": _DESCRIBE_PROMPT}]}],
+    )
+    return "".join(b.text for b in response.content if b.type == "text").strip()
+
+
+def _describe_with_gemini(conteudo: bytes, mime: str, model: str) -> str | None:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        log.info("GEMINI_API_KEY não configurada — não dá pra ler o anexo via IA.")
+        return None
+    from google import genai
+    from google.genai import types as genai_types
+
+    # O client precisa de uma referência viva durante a chamada: criado inline, ele é
+    # coletado antes e a chamada falha com "client has been closed" (visto testando).
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model=model,
+        contents=[genai_types.Part.from_bytes(data=conteudo, mime_type=mime), _DESCRIBE_PROMPT],
+        config=genai_types.GenerateContentConfig(
+            max_output_tokens=1500,
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),  # ver _generate_with_gemini
+        ),
+    )
+    return (response.text or "").strip()
+
+
+_DESCRIBERS = {"anthropic": _describe_with_anthropic, "gemini": _describe_with_gemini}
+
+
+def describe_file(conteudo: bytes, mime: str, config: dict) -> str | None:
+    """
+    Texto + descrição de uma imagem ou PDF sem texto (escaneado), pela mesma IA das
+    propostas (proposal.ia_provider/ia_model). None se a IA não estiver configurada ou falhar.
+    """
+    proposal_cfg = (config or {}).get("proposal", {})
+    provider_name = proposal_cfg.get("ia_provider", "anthropic")
+    describer = _DESCRIBERS.get(provider_name)
+    if not describer:
+        return None
+    model = proposal_cfg.get("ia_model", _PROVIDERS[provider_name][1])
+    try:
+        return describer(conteudo, mime, model) or None
+    except Exception as e:
+        log.info("IA (%s) não conseguiu ler o anexo: %s", provider_name, e)
+        return None

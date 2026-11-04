@@ -71,9 +71,11 @@ class FakeTelegram:
         self._next_message_id = 1000
         self._next_update_id = 1
 
-    def post(self, url, json=None, timeout=None, **kwargs):
+    def post(self, url, json=None, timeout=None, data=None, files=None, **kwargs):
         method = url.rsplit("/", 1)[-1]
-        payload = json or {}
+        payload = json or dict(data or {})
+        if files:  # sendDocument (multipart): grava nome e conteúdo do arquivo
+            payload["files"] = {campo: {"name": nome, "content": conteudo} for campo, (nome, conteudo) in files.items()}
         self.calls.append((method, payload))
         if self.down:
             return _FakeResponse({"ok": False, "description": "down"})
@@ -81,7 +83,7 @@ class FakeTelegram:
             offset = payload.get("offset", 0)
             pendentes = [u for u in self.updates if u["update_id"] >= offset]
             return _FakeResponse({"ok": True, "result": pendentes})
-        if method == "sendMessage":
+        if method in ("sendMessage", "sendDocument"):
             self._next_message_id += 1
             return _FakeResponse({"ok": True, "result": {"message_id": self._next_message_id}})
         return _FakeResponse({"ok": True, "result": True})

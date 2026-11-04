@@ -180,6 +180,17 @@ mensagens:
     pensar_segundos: [15, 45]               # antes da 1ª parte de conteúdo
     pausa_entre_mensagens_segundos: [3, 10]
     leitura_caracteres_por_segundo: 25      # tempo pra "ler" as mensagens do cliente (máx 60s)
+  # Pacote pro Projeto do Claude: no 1º retorno do cliente depois da proposta (antes de
+  # você escrever qualquer coisa na conversa), o bot espera o cliente ficar
+  # `aguardar_minutos` sem mandar nada e manda no Telegram um texto pronto pra colar num
+  # Projeto do claude.ai: projeto, descrição, a sua proposta (valor, prazo e texto) e tudo o
+  # que o cliente mandou — com o conteúdo de anexos (PDF, DOCX, XLSX, HTML, texto; imagem e
+  # PDF escaneado pela IA de `proposal`) e de links (até 5) já lido. O que não deu pra ler
+  # aparece com o link/nome e o motivo. Responder à mensagem do pacote envia pro cliente.
+  pacote_claude:
+    ativo: false
+    aguardar_minutos: 15
+    instrucao: "Analise a resposta do cliente e sugira a minha próxima mensagem."
 
 # Vagas publicadas como issues no GitHub (bot/github_jobs.py). A cada ciclo de varredura
 # o bot busca as issues abertas com TODAS as labels listadas; quando o corpo da issue tem

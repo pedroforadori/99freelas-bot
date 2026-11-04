@@ -96,6 +96,25 @@ def notify_client_messages(conversa: dict, mensagens: list[dict], motivo_sem_ia:
     return telegram_api.send_with_keyboard(cabecalho + corpo + rodape, None)
 
 
+def notify_claude_packet(conversa: dict, pacote: str) -> int | None:
+    """
+    Pacote pronto pra colar num Projeto do claude.ai (messages.process_claude_packets): num
+    bloco <pre> (tocar copia tudo) ou, se não couber numa mensagem, como arquivo .md pra
+    arrastar. Devolve o message_id — vira thread (reply = resposta pro cliente).
+    """
+    cabecalho = f"{_PREFIX}📋 <b>Pacote pro Claude</b> — {_conversa_header(conversa)}"
+    rodape = f"{_conversa_link(conversa)}\n{_REPLY_HINT}"
+    texto = (
+        f"{cabecalho}\n<i>Toque no bloco pra copiar e cole no Projeto do Claude.</i>\n\n"
+        f"<pre>{esc(pacote)}</pre>\n\n{rodape}"
+    )
+    if len(texto) <= telegram_api.MSG_LIMIT:
+        return telegram_api.send_with_keyboard(texto, None)
+    legenda = f"{cabecalho}\n<i>Grande demais pra uma mensagem: arraste o arquivo pro Projeto do Claude.</i>\n\n{rodape}"
+    nome = f"pacote-{conversa.get('projeto_id') or conversa['id']}.md"
+    return telegram_api.send_document(nome, pacote.encode("utf-8"), legenda)
+
+
 _PARTE_STATUS = {
     "sent": "✅ enviada às {hora}",
     "pending": "🕒 sai por volta das {hora}",

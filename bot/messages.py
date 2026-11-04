@@ -48,7 +48,7 @@ from datetime import datetime
 
 from bs4 import BeautifulSoup
 
-from bot import ai_writer
+from bot import ai_writer, attachments
 from bot.sources.freelas99 import views
 from bot import site_selectors as sel
 from bot import telegram_api
@@ -220,6 +220,19 @@ def html_to_text(raw: str | None) -> str:
     return html.unescape(texto).replace("\xa0", " ").strip()
 
 
+# Textos que o próprio site escreve na conversa: a proposta enviada ("Enviei uma proposta de
+# R$ ...", autor = eu) e a rejeição dela ("Rejeitei a sua proposta de R$ ...", autor = o
+# CLIENTE). Os dois vêm com sistema=True (confirmado 2026-10-27, conversa 17508640); o texto
+# é a 2ª garantia — sem ela, uma rejeição sem a flag viraria "mensagem do cliente" e
+# dispararia aviso, resposta da IA e pacote do Claude.
+_MARCA_PROPOSTA = "Enviei uma proposta"
+_MARCA_REJEICAO = "Rejeitei a sua proposta"
+
+
+def _is_system(m: dict) -> bool:
+    return bool(m.get("sistema")) or html_to_text(m.get("texto")).startswith((_MARCA_PROPOSTA, _MARCA_REJEICAO))
+
+
 def _fetch_unread_conversations(page) -> list[dict]:
     result = _api_get(
         page, sel.MESSAGES_API_CONVERSATIONS,
@@ -285,7 +298,7 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
         )
 
         def do_cliente(m):
-            return (m.get("pessoa") or {}).get("id") != eu and not m.get("sistema")
+            return (m.get("pessoa") or {}).get("id") != eu and not _is_system(m)
 
         recem = [
             m for m in todas
@@ -296,7 +309,7 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
             continue
         ignorar = set(ignorar_meus.get(str(conversa_id), ()))
         minha_ultima = max(
-            (m["id"] for m in todas if not do_cliente(m) and not m.get("sistema") and m["id"] not in ignorar),
+            (m["id"] for m in todas if not do_cliente(m) and not _is_system(m) and m["id"] not in ignorar),
             default=0,
         )
         piso = max(floors.get(str(conversa_id), 0), minha_ultima)
@@ -309,6 +322,7 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
             return {"id": m["id"], "texto": html_to_text(m.get("texto")), "tem_arquivos": bool(m.get("arquivos"))}
 
         novas.append({
+            "eu": eu,
             "conversa": {
                 "id": conversa_id,
                 "cliente": cliente,
@@ -321,13 +335,13 @@ def fetch_new_client_messages(page, state: dict, ignorar_meus: dict | None = Non
             "mensagens": [resumo(m) for m in pendentes],
             "ultima_chegada": max((m.get("dhCriacaoInMillis") or 0) for m in recem) / 1000,
             "historico": [
-                ("Site (sistema)" if m.get("sistema") else (cliente if do_cliente(m) else freelancer or "Eu"),
+                ("Site (sistema)" if _is_system(m) else (cliente if do_cliente(m) else freelancer or "Eu"),
                  html_to_text(m.get("texto")) or "(anexo)")
                 for m in todas if m["id"] not in ids_pendentes
             ],
             "meus_textos": [html_to_text(m.get("texto")) for m in todas if not do_cliente(m)],
             "ja_conversou": any(
-                not do_cliente(m) and not m.get("sistema") for m in todas if m["id"] not in ids_pendentes
+                not do_cliente(m) and not _is_system(m) for m in todas if m["id"] not in ids_pendentes
             ),
             "bloqueio_ia": _negotiation_blocker(conv),
         })
@@ -513,12 +527,15 @@ def check_and_notify(page, config: dict | None = None) -> None:
         _api_falhando = False
 
     auto, max_auto, aguardar = _auto_reply_settings(config)
+    pacote_ativo, pacote_espera, _ = _packet_settings(config)
     for item in novas:
         conversa = item["conversa"]
         ultimo_id = item["ultimo_id"]
         if not item["mensagens"]:
             _mark_handled(conversa["id"], ultimo_id)  # já respondido (ex: você respondeu pelo site)
             continue
+        if pacote_ativo and _is_first_return(item):
+            _schedule_packet(item, pacote_espera)
         motivo = item["bloqueio_ia"] if auto else None
         if auto and motivo is None:
             if _load_cache().get("auto_count", {}).get(str(conversa["id"]), 0) >= max_auto:
@@ -546,6 +563,181 @@ def check_and_notify(page, config: dict | None = None) -> None:
 
     # Respostas automáticas enfileiradas acima saem já, sem esperar o próximo tick.
     process_outbox(page)
+    process_claude_packets(page, config)
+
+
+# --- Pacote pro Projeto do Claude -------------------------------------------------------------
+# Pedido do usuário (2026-10-27): no 1º retorno do cliente depois da proposta, ele copiava à
+# mão descrição + proposta + resposta (e abria anexos/links) pra um Projeto do claude.ai, que
+# sugere a próxima mensagem. O claude.ai não tem API pra gravar num Projeto, então o bot
+# monta o pacote pronto pra colar e manda no Telegram, depois de o cliente ficar
+# mensagens.pacote_claude.aguardar_minutos sem escrever (ele costuma mandar várias seguidas).
+
+MAX_LINKS_PACOTE = 5
+MAX_PACOTES_ENVIADOS = 500
+INSTRUCAO_PACOTE_PADRAO = "Analise a resposta do cliente e sugira a minha próxima mensagem."
+_HREF = re.compile(r"href=[\"']([^\"']+)[\"']", re.I)
+
+
+def _packet_settings(config: dict | None) -> tuple[bool, float, str]:
+    cfg = ((config or {}).get("mensagens") or {}).get("pacote_claude") or {}
+    return (
+        bool(cfg.get("ativo", False)),
+        float(cfg.get("aguardar_minutos", 15)) * 60,
+        cfg.get("instrucao") or INSTRUCAO_PACOTE_PADRAO,
+    )
+
+
+def _is_first_return(item: dict) -> bool:
+    """
+    Ainda não escrevi nada na conversa além da proposta (que é mensagem de sistema), e o
+    cliente não a rejeitou — proposta rejeitada não tem próxima resposta pra sugerir.
+    """
+    sistema = [texto for quem, texto in item["historico"] if quem == "Site (sistema)"]
+    return (
+        not item["ja_conversou"]
+        and any(texto.startswith(_MARCA_PROPOSTA) for texto in sistema)
+        and not any(texto.startswith(_MARCA_REJEICAO) for texto in sistema)
+    )
+
+
+def _schedule_packet(item: dict, espera: float) -> None:
+    """Agenda (ou adia, se o cliente escreveu de novo) o pacote da conversa."""
+    conversa = {k: v for k, v in item["conversa"].items() if k != "descricao"}
+    chave = str(conversa["id"])
+    due = (item["ultima_chegada"] or _now()) + espera
+    with _LOCK:
+        cache = _load_cache()
+        pacotes = cache.setdefault("pacotes", {})
+        pendentes = pacotes.setdefault("pendentes", {})
+        if chave in pacotes.get("enviados", {}) or pendentes.get(chave, {}).get("due", 0) >= due:
+            return
+        pendentes[chave] = {"conversa": conversa, "eu": item["eu"], "due": due}
+        _save_json(CACHE_PATH, cache)
+
+
+def _update_packet(chave: str, due: float | None = None, enviado: bool = False) -> None:
+    """due: adia. Sem due: tira dos pendentes (enviado=True grava pra nunca repetir)."""
+    with _LOCK:
+        cache = _load_cache()
+        pacotes = cache.setdefault("pacotes", {})
+        pendentes = pacotes.setdefault("pendentes", {})
+        if due is not None:
+            if chave in pendentes:
+                pendentes[chave]["due"] = due
+        else:
+            pendentes.pop(chave, None)
+            if enviado:
+                enviados = pacotes.setdefault("enviados", {})
+                enviados[chave] = _now()
+                _trim(enviados, MAX_PACOTES_ENVIADOS)
+        _save_json(CACHE_PATH, cache)
+
+
+def process_claude_packets(page, config: dict | None) -> None:
+    """
+    Manda os pacotes cujo prazo de espera passou. Relê a conversa direto (ela pode ter saído
+    das não lidas — você leu no site): mensagem nova do cliente adia; se você já respondeu,
+    o pacote não sai (não é mais o 1º retorno).
+    """
+    ativo, espera, instrucao = _packet_settings(config)
+    if not ativo:
+        return
+    with _LOCK:
+        pendentes = dict((_load_cache().get("pacotes") or {}).get("pendentes") or {})
+    for chave, pendente in pendentes.items():
+        if pendente["due"] > _now():
+            continue
+        conversa, eu = pendente["conversa"], pendente["eu"]
+        try:
+            todas = sorted(
+                (m for m in _fetch_messages(page, conversa["id"]) if not m.get("excluida")),
+                key=lambda m: m.get("id", 0),
+            )
+        except Exception as e:
+            log.info("Pacote do Claude: não consegui ler a conversa %s: %s", conversa["id"], e)
+            continue
+
+        def do_cliente(m):
+            return (m.get("pessoa") or {}).get("id") != eu and not _is_system(m)
+
+        if any(not do_cliente(m) and not _is_system(m) for m in todas):
+            _update_packet(chave)
+            log.info("Pacote do Claude da conversa %s cancelado: você já respondeu o cliente.", chave)
+            continue
+        if any(_is_system(m) and html_to_text(m.get("texto")).startswith(_MARCA_REJEICAO) for m in todas):
+            _update_packet(chave)
+            log.info("Pacote do Claude da conversa %s cancelado: o cliente rejeitou a proposta.", chave)
+            continue
+        ultima = max(((m.get("dhCriacaoInMillis") or 0) / 1000 for m in todas if do_cliente(m)), default=0)
+        if ultima + espera > _now():
+            _update_packet(chave, due=ultima + espera)  # o cliente escreveu de novo
+            continue
+
+        conversa = {**conversa, "descricao": project_description(page, conversa)}
+        pacote = build_claude_packet(conversa, todas, eu, instrucao, config)
+        message_id = views.notify_claude_packet(conversa, pacote)
+        if message_id is None:
+            _update_packet(chave, due=_now() + 60)  # Telegram fora: tenta de novo daqui a pouco
+            continue
+        register_thread(message_id, conversa)
+        _update_packet(chave, enviado=True)
+        log.info("Pacote do Claude da conversa %s (%s) enviado.", chave, conversa["cliente"])
+
+
+def _message_links(raw: str | None) -> list[str]:
+    links = attachments.find_links(html_to_text(raw))
+    for href in _HREF.findall(raw or ""):
+        for url in attachments.find_links(html.unescape(href)):
+            if url not in links:
+                links.append(url)
+    return links
+
+
+def build_claude_packet(conversa: dict, todas: list[dict], eu, instrucao: str, config: dict | None) -> str:
+    """
+    Texto pro Projeto do Claude: projeto, descrição, a proposta (a mensagem de sistema do
+    site — tem valor, prazo e texto) e tudo o que o cliente mandou, com o conteúdo de
+    anexos e links lido ali mesmo (attachments.py). O que não deu pra ler aparece com o motivo.
+    """
+    linhas = [f"Projeto: {conversa.get('projeto') or '(sem título)'}"]
+    if conversa.get("projeto_url"):
+        linhas.append(f"Link: {conversa['projeto_url']}")
+    linhas += [f"Cliente: {conversa['cliente']}", "", "## Descrição do projeto",
+               conversa.get("descricao") or "(não consegui ler a descrição — veja no link)"]
+
+    propostas = [m for m in todas if _is_system(m) and _MARCA_PROPOSTA in html_to_text(m.get("texto"))]
+    linhas += ["", "## Minha proposta"]
+    linhas += [html_to_text(m.get("texto")) for m in propostas] or ["(não encontrei a proposta na conversa)"]
+
+    linhas += ["", "## Mensagens do cliente"]
+    links_lidos = 0
+    for m in todas:
+        if m in propostas:
+            continue
+        if _is_system(m):
+            linhas += [f"[Aviso do site] {html_to_text(m.get('texto'))}", ""]
+            continue
+        if (m.get("pessoa") or {}).get("id") == eu:
+            continue
+        bloco = [html_to_text(m.get("texto"))] if html_to_text(m.get("texto")) else []
+        for arquivo in m.get("arquivos") or []:
+            if arquivo.get("excluido"):
+                continue
+            nome = f"{arquivo.get('nome') or 'arquivo'}.{arquivo.get('extensao') or ''}".rstrip(".")
+            texto, erro = attachments.read_attachment(arquivo, config)
+            bloco += [f"[Anexo: {nome}]", texto] if texto else [f"[Anexo: {nome} — não consegui ler: {erro}]"]
+        for url in _message_links(m.get("texto")):
+            if links_lidos >= MAX_LINKS_PACOTE:
+                bloco.append(f"[Link: {url} — não li: limite de {MAX_LINKS_PACOTE} links por pacote]")
+                continue
+            links_lidos += 1
+            texto, erro = attachments.read_link(url, config)
+            bloco += [f"[Link: {url}]", texto] if texto else [f"[Link: {url} — não consegui ler: {erro}]"]
+        linhas += bloco + [""]
+
+    linhas += ["---", instrucao]
+    return "\n".join(linhas).strip() + "\n"
 
 
 def _auto_reply(page, item: dict, config: dict) -> None:
