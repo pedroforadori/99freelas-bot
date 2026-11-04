@@ -57,8 +57,8 @@ def _conversa_header(conversa: dict) -> str:
 def _projeto_bloco(conversa: dict, max_chars: int = 1200) -> str:
     """
     Descrição do projeto (messages.project_description) num bloco recolhível — toca pra
-    expandir. Só nos avisos de mensagem de cliente; nas confirmações não (a conversa vem do
-    mapa de threads, sem a descrição).
+    expandir. Nos avisos de mensagem de cliente (nas confirmações não: a conversa vem do
+    mapa de threads, sem a descrição) e no resultado do envio (notify_proposal_result).
     """
     descricao = conversa.get("descricao")
     if not descricao:
@@ -367,6 +367,12 @@ def notify_proposal_result(
         linhas.append(linha_conexoes)
 
     linhas.append(f"<b>Detalhe:</b> {esc(detail)}")
+
+    # Descrição do projeto num bloco recolhível — dá pra lembrar do que se trata sem abrir
+    # o site (pedido do usuário, 2026-10-29).
+    descricao = (proposal or {}).get("full_description") or project.get("description")
+    if descricao:
+        linhas.append(_projeto_bloco({"descricao": descricao}, max_chars=1500))
 
     # Falha real ganha botão de retry (ver telegram_dispatcher). Nunca em simulação.
     # Envio real ganha "🗑️ Cancelar proposta" (o mesmo cancelamento do menu de link, que acha
