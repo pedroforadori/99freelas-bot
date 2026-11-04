@@ -7,7 +7,7 @@ from bot import ai_writer
 from bot import site_selectors as sel
 from bot.filter import anuncio_de_freelancer, excluded_keyword, fora_da_area, ignora_anuncios, ignora_fora_da_area
 from bot.logger_setup import get_logger
-from bot.proposal import OFERTA_MINIMA, build_proposal, normalizar_para_o_site, primeiro_nome, valor_manual
+from bot.proposal import build_proposal, normalizar_para_o_site, oferta_minima, primeiro_nome, valor_manual
 from bot.utils import format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -339,10 +339,12 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
     """
     if not dry_run and (proposal.get("oferta") is None or proposal.get("prazo_dias") is None):
         return _finish(project, proposal, False, "valor/prazo não informados — responda à mensagem com o valor e o prazo")
-    if not dry_run and proposal["oferta"] < OFERTA_MINIMA:
+    minimo = oferta_minima(proposal)
+    if not dry_run and proposal["oferta"] < minimo:
         return _finish(
             project, proposal, False,
-            f"oferta de R$ {format_currency_br(proposal['oferta'])} abaixo do mínimo de R$ {format_currency_br(OFERTA_MINIMA)}",
+            f"oferta de R$ {format_currency_br(proposal['oferta'])} abaixo do mínimo de R$ {format_currency_br(minimo)}"
+            + (" (app de celular)" if proposal.get("app_celular") else ""),
         )
     page.goto(project["url"], wait_until="networkidle")
 

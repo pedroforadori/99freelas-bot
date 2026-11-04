@@ -312,13 +312,19 @@ def _origem_line(proposal: dict) -> str | None:
     origem = proposal.get("origem_valor")
     if not origem:
         return None
+    # Piso de app de celular (proposal.OFERTA_MINIMA_APP) — vale também com valor manual.
+    app = (
+        f"📱 <i>App de celular: mínimo de R$ {format_currency_br(proposal['oferta_minima'])}</i>"
+        if proposal.get("app_celular") and proposal.get("oferta_minima") else None
+    )
     media = proposal.get("media_concorrentes")
     if aguardando_valor(proposal):
         if not media:
-            return None
+            return app
         media_prazo = proposal.get("media_prazo")
         prazo_txt = f" · {media_prazo} dias" if media_prazo else ""
-        return f"<b>Média das propostas concorrentes:</b> R$ {format_currency_br(media)}{prazo_txt}"
+        linha = f"<b>Média das propostas concorrentes:</b> R$ {format_currency_br(media)}{prazo_txt}"
+        return f"{linha}\n{app}" if app else linha
     label = ORIGEM_LABELS.get(origem, origem)
     if proposal.get("ajustado_manualmente"):
         label += " · ajustado manualmente"
@@ -326,12 +332,18 @@ def _origem_line(proposal: dict) -> str | None:
 
     oferta_sugerida = proposal.get("oferta_sugerida_ia")
     if oferta_sugerida is not None:
-        linha += f"\n<i>(IA sugeriu R$ {format_currency_br(oferta_sugerida)} — desconto competitivo aplicado)</i>"
+        ajuste = (
+            "subiu pro mínimo de app" if app and oferta_sugerida < (proposal.get("oferta") or 0)
+            else "desconto competitivo aplicado"
+        )
+        linha += f"\n<i>(IA sugeriu R$ {format_currency_br(oferta_sugerida)} — {ajuste})</i>"
     media = proposal.get("media_concorrentes")
     if media:
         media_prazo = proposal.get("media_prazo")
         prazo_txt = f" · {media_prazo} dias" if media_prazo else ""
         linha += f"\n<i>(média das propostas concorrentes: R$ {format_currency_br(media)}{prazo_txt})</i>"
+    if app:
+        linha += f"\n{app}"
     return linha
 
 

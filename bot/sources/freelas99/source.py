@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from bot import ai_writer, approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.proposal import OFERTA_MINIMA, com_nome_do_cliente, describe_valor, valor_manual
+from bot.proposal import OFERTA_MINIMA, com_nome_do_cliente, describe_valor, oferta_minima, valor_manual
 from bot.sources.base import Callback, CallbackRoute, EditableField, JobSource
 from bot.sources.freelas99 import auth, views
 from bot.storage import already_applied, register_application
@@ -43,9 +43,15 @@ def _parse_prazo(raw: str) -> int | None:
 
 
 def _apply_oferta(proposal: dict, valor: float) -> str:
+    # _parse_oferta não vê a proposta: o piso maior de app de celular é aplicado aqui.
+    minimo = oferta_minima(proposal)
+    aviso = ""
+    if valor < minimo:
+        valor = minimo
+        aviso = f" (o mínimo pra app de celular é R$ {format_currency_br(minimo)})"
     proposal["oferta"] = valor
     proposal["ajustado_manualmente"] = True
-    return f"Oferta atualizada: R$ {format_currency_br(valor)}"
+    return f"Oferta atualizada: R$ {format_currency_br(valor)}{aviso}"
 
 
 def _apply_prazo(proposal: dict, valor: int) -> str:
@@ -808,6 +814,13 @@ class Freelas99Source(JobSource):
             telegram_api.send_message(f"{self.tag} {_VALOR_PRAZO_INVALIDO}")
             return True
         oferta, prazo = valores
+        minimo = oferta_minima(entry["proposal"])
+        if oferta < minimo:
+            telegram_api.send_message(
+                f"{self.tag} Valor abaixo do mínimo pra app de celular: R$ {format_currency_br(minimo)}. "
+                "Responda de novo à mensagem do projeto com o valor e o prazo."
+            )
+            return True
         proposal = dict(entry["proposal"], oferta=oferta, prazo_dias=prazo)
         if not approvals.approve_with_proposal(project_id, proposal):
             telegram_api.send_message(f"{self.tag} Essa proposta já foi decidida — resposta ignorada.")

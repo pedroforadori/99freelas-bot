@@ -32,6 +32,31 @@ ORIGEM_LABELS = {
 # (source._parse_oferta); e submitter.finalize_submission nunca envia abaixo disso.
 OFERTA_MINIMA = 100.0
 
+# App de celular (iOS/Android) tem piso próprio (regra do usuário, 2026-10-28 — caso real:
+# app de despertador com desafios saiu por R$ 150). proposal.oferta_minima_app no config.yaml.
+# Vale nas mesmas três camadas do OFERTA_MINIMA, pelo proposal["oferta_minima"] gravado aqui.
+OFERTA_MINIMA_APP = 1200.0
+_APP_FORTE = re.compile(
+    r"\b(?:android|ios|iphone|ipad|play ?store|google play|app ?store|apple store|flutter|react native"
+    r"|(?:app|aplicativo)s? (?:mobile|nativos?|para (?:o |os )?(?:celular|smartphone)s?|de (?:celular|smartphone)s?))\b"
+)
+_APP = re.compile(r"\b(?:app|apps|aplicativos?)\b")
+_CELULAR = re.compile(r"\b(?:celular(?:es)?|smartphones?|mobile|instalar|notificaç(?:ão|ões) push|push)\b")
+_APP_WEB = re.compile(r"\b(?:(?:app|aplicativo|aplicação) web|web ?app|pwa|sistema web)\b")
+
+
+def app_de_celular(texto: str) -> bool:
+    """Projeto é claramente app pra instalar no celular (iOS/Android)? Site/sistema web não conta."""
+    texto = (texto or "").lower()
+    if _APP_FORTE.search(texto):
+        return True
+    return bool(_APP.search(texto) and _CELULAR.search(texto) and not _APP_WEB.search(texto))
+
+
+def oferta_minima(proposal: dict) -> float:
+    """Piso da oferta dessa proposta (o de app só vem em propostas montadas depois de 2026-10-28)."""
+    return float(proposal.get("oferta_minima") or OFERTA_MINIMA)
+
 
 def valor_manual(config: dict) -> bool:
     """
@@ -312,9 +337,11 @@ def build_proposal(
         oferta = orcamento_cliente
         origem = "orcamento_cliente"
 
-    if oferta and oferta < OFERTA_MINIMA:
-        log.info("Oferta de R$%s para '%s' abaixo do mínimo — usando R$%s.", oferta, project.get("title"), OFERTA_MINIMA)
-        oferta = OFERTA_MINIMA
+    app = app_de_celular(f"{project.get('title', '')}\n{full_description or project.get('description') or ''}")
+    minimo = float(proposal_cfg.get("oferta_minima_app", OFERTA_MINIMA_APP)) if app else OFERTA_MINIMA
+    if oferta and oferta < minimo:
+        log.info("Oferta de R$%s para '%s' abaixo do mínimo — usando R$%s.", oferta, project.get("title"), minimo)
+        oferta = minimo
 
     if media_prazo and origem not in ("manual", "ia", "ia_com_media"):
         prazo_dias = _prazo_abaixo_da_media(media_prazo, proposal_cfg)
@@ -336,7 +363,10 @@ def build_proposal(
         "media_concorrentes": lowest_bid,
         "media_prazo": media_prazo,
         "texto_variante": texto_variante,
+        "oferta_minima": minimo,
     }
+    if app:
+        resultado["app_celular"] = True
     if origem in ("ia", "ia_com_media") and oferta_sugerida_ia != oferta:
         # Guarda o valor bruto sugerido pela IA (antes do desconto competitivo) pra
         # notifier.py mostrar os dois lado a lado no Telegram — ajuda a validar/lapidar
