@@ -131,6 +131,13 @@ PROPOSAL_SUCCESS_MARKER = ".icon-proposal"
 # "#btnCancelarProposta" é um link que CANCELA a proposta se clicado.
 PROPOSAL_ALREADY_SENT_MARKER = "#btnCancelarProposta, .icon-proposal"
 # O link "Cancelar proposta" em si (<a id="btnCancelarProposta" class="simple-link">),
-# fornecido pelo usuário. SÓ clicado por submitter.cancel_proposal, depois de uma
-# confirmação explícita no Telegram — em qualquer outro lugar, só checagem de presença.
+# fornecido pelo usuário. SÓ clicado por submitter.cancel_proposal (botão "🗑️ Cancelar
+# proposta" do Telegram) — em qualquer outro lugar, só checagem de presença. Não vem no
+# HTML servido: o site monta via JS, então só aparece na Page do Playwright.
 PROPOSAL_CANCEL_LINK = "#btnCancelarProposta"
+# O clique nele não cancela sozinho: abre o modal próprio do site "Confirma o cancelamento
+# da sua proposta?" (lido em project-view.js e no HTML da página do projeto, 2026-10-29 —
+# antes o bot só aceitava confirm() nativo e o cancelamento nunca acontecia). "Sim" =
+# <a class="btn-acao ..."> dentro de <div class="modal modal-confirmacao">; o site então
+# faz o POST de cancelarProposta e recarrega a página do projeto.
+PROPOSAL_CANCEL_CONFIRM_BUTTON = ".modal.modal-confirmacao .btn-acao"

@@ -386,21 +386,25 @@ def finalize_submission(page: Page, project: dict, proposal: dict, dry_run: bool
 def cancel_proposal(page: Page, url: str) -> tuple[bool, str]:
     """
     Cancela a proposta já enviada pra um projeto, clicando em "Cancelar proposta"
-    (PROPOSAL_CANCEL_LINK) na página do projeto. Só chamada a partir do botão
-    "🗑️ Cancelar proposta" do menu de link, depois da confirmação no Telegram.
+    (PROPOSAL_CANCEL_LINK) na página do projeto e depois em "Sim" no modal de confirmação
+    do site (PROPOSAL_CANCEL_CONFIRM_BUTTON). Só chamada a partir do botão
+    "🗑️ Cancelar proposta" do Telegram (mensagem de enviada ou menu de link).
 
-    Ainda não se sabe se o site pede confirmação ao clicar: um confirm() nativo do
-    navegador é aceito automaticamente; um modal próprio do site não — por isso o sucesso
-    só é declarado depois de recarregar a página e ver que o link sumiu.
+    O sucesso só é declarado depois de recarregar a página e ver que o link sumiu.
     """
     page.goto(url, wait_until="networkidle")
     if not page.query_selector(sel.PROPOSAL_CANCEL_LINK):
         return False, "não há proposta ativa sua nesse projeto pra cancelar"
 
-    page.once("dialog", lambda dialog: dialog.accept())
     page.click(sel.PROPOSAL_CANCEL_LINK, timeout=8000)
     try:
-        page.wait_for_load_state("networkidle", timeout=8000)
+        page.wait_for_selector(sel.PROPOSAL_CANCEL_CONFIRM_BUTTON, state="visible", timeout=8000)
+    except PlaywrightTimeoutError:
+        return False, "cliquei em 'Cancelar proposta' mas o modal de confirmação do site não abriu; confira no site"
+    try:
+        # "Sim" faz o POST e o site recarrega a página do projeto.
+        with page.expect_navigation(wait_until="networkidle", timeout=15000):
+            page.click(sel.PROPOSAL_CANCEL_CONFIRM_BUTTON, timeout=8000)
     except PlaywrightTimeoutError:
         pass  # a checagem abaixo (página recarregada) é que decide
 
