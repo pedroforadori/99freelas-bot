@@ -91,6 +91,11 @@ PROJECT_PAGE_DESCRIPTION = ".item-text.project-description"
 # submitter._read_project_title. Ex real:
 # <span class="nome-projeto">Desenvolver aplicativo ...<span class="detalhes">&nbsp;(<span class="link-detalhes">+ detalhes</span>)</span></span>
 PROJECT_PAGE_TITLE = "span.nome-projeto"
+# Nome do cliente no bloco "Cliente" da página do projeto (validado contra HTML real do
+# projeto 793959, 2026-10-28): nome + inicial do sobrenome, ex "Tulio V.". Lido em
+# submitter._read_client_first_name pro cumprimento da proposta.
+# <div class="info-usuario cliente">...<div class="info-usuario-nome"><a href="/user/tuliovargas"><span class="name">Tulio V.</span></a>
+PROJECT_PAGE_CLIENT_NAME = ".info-usuario.cliente .info-usuario-nome .name"
 # "Enviar proposta" é um link que NAVEGA pra uma página separada (/project/bid/<slug>-<id>),
 # não abre um formulário na mesma página — ver navegação explícita em submitter.py.
 PROPOSAL_BUTTON = "a.clickable:has-text('Enviar proposta')"

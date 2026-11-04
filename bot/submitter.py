@@ -7,7 +7,7 @@ from bot import ai_writer
 from bot import site_selectors as sel
 from bot.filter import anuncio_de_freelancer, excluded_keyword, fora_da_area, ignora_anuncios, ignora_fora_da_area
 from bot.logger_setup import get_logger
-from bot.proposal import OFERTA_MINIMA, build_proposal, normalizar_para_o_site, valor_manual
+from bot.proposal import OFERTA_MINIMA, build_proposal, normalizar_para_o_site, primeiro_nome, valor_manual
 from bot.utils import format_currency_br, parse_currency
 
 log = get_logger(__name__)
@@ -97,6 +97,12 @@ def _read_project_title(page: Page, url: str) -> str:
 
     slug = re.sub(r"-\d+$", "", url.rstrip("/").rsplit("/", 1)[-1])
     return slug.replace("-", " ").capitalize() or url
+
+
+def _read_client_first_name(page: Page) -> str | None:
+    """Primeiro nome do cliente no bloco "Cliente" da página do projeto ("Tulio V." → "Tulio")."""
+    el = page.query_selector(sel.PROJECT_PAGE_CLIENT_NAME)
+    return primeiro_nome(el.inner_text()) if el else None
 
 
 def _triagem(project: dict, full_description: str | None, config: dict) -> str | None:
@@ -218,6 +224,8 @@ def prepare_proposal(
     # Lida aqui (página do projeto) porque "Enviar proposta" navega pra outra página,
     # onde esse elemento não existe mais.
     full_description = _read_full_description(page)
+    # Vai no cumprimento do texto ("Olá, Tulio, tudo bem?") — ver proposal.com_nome_do_cliente.
+    project["cliente"] = _read_client_first_name(page)
     if check_exclude:
         kw = excluded_keyword(f"{project.get('title', '')} {full_description or ''}", config)
         if kw:

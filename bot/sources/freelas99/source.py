@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from bot import ai_writer, approvals, connections, manual_queue, messages, notifier, scraper, storage, submitter, telegram_api
 from bot.filter import is_match
 from bot.logger_setup import get_logger
-from bot.proposal import OFERTA_MINIMA, describe_valor, valor_manual
+from bot.proposal import OFERTA_MINIMA, com_nome_do_cliente, describe_valor, valor_manual
 from bot.sources.base import Callback, CallbackRoute, EditableField, JobSource
 from bot.sources.freelas99 import auth, views
 from bot.storage import already_applied, register_application
@@ -703,7 +703,7 @@ class Freelas99Source(JobSource):
             cb.answer("IA falhou de novo. Tente mais tarde ou aprove com o texto atual.")
             return
 
-        proposal["texto"] = texto
+        proposal["texto"] = com_nome_do_cliente(texto, entry["project"])
         proposal["texto_ia_falhou"] = False
         proposal["texto_variante"] = variante
         if not approvals.update_proposal(project_id, proposal):

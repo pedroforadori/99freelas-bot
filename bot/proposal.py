@@ -1,5 +1,6 @@
 import math
 import random
+import re
 
 from bot import ai_writer
 from bot.logger_setup import get_logger
@@ -145,11 +146,56 @@ def normalizar_para_o_site(texto: str) -> str:
     return texto.encode("latin-1", errors="ignore").decode("latin-1")
 
 
-def _finalizar_texto(texto: str, project: dict, proposal_cfg: dict) -> tuple[str, bool]:
+def primeiro_nome(nome: str | None) -> str | None:
     """
-    Anexa a nota_extra e roda a checagem final de segurança. Retorna (texto, substituido)
-    — substituido=True quando o texto violou alguma regra e virou _SAFE_FALLBACK_TEXTO.
+    "Tulio V." → "Tulio" (o site mostra nome + inicial do sobrenome). None quando não há um
+    nome de verdade (vazio, só inicial, número/apelido estranho) — aí o cumprimento fica sem nome.
     """
+    partes = (nome or "").replace("\xa0", " ").split()
+    if not partes:
+        return None
+    primeiro = partes[0].strip(".,;:!?")
+    if len(primeiro) < 2 or not re.fullmatch(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", primeiro):
+        return None
+    if primeiro.isupper() or primeiro.islower():
+        primeiro = primeiro.capitalize()
+    return primeiro
+
+
+# Cumprimento no começo do texto: "Olá", "Oi", "Bom dia"..., com a pontuação logo depois.
+_CUMPRIMENTO = re.compile(r"(Olá|Ola|Oi|Bom dia|Boa tarde|Boa noite)(?![^\W\d_])[ \t]*([,!.]?)[ \t]*", re.I)
+
+
+def com_nome_do_cliente(texto: str, project: dict) -> str:
+    """
+    Põe o primeiro nome do cliente (project["cliente"], lido em submitter.prepare_proposal)
+    no cumprimento — pedido do usuário (2026-10-28): "Olá, tudo bem?" → "Olá, Tulio, tudo
+    bem?". Feito no código, não no prompt, pra valer em todo estilo e no template fixo e nunca
+    depender da IA acertar o nome. Texto sem cumprimento no começo, ou que já cita o nome na
+    1ª linha, fica como está.
+    """
+    nome = project.get("cliente")
+    m = _CUMPRIMENTO.match(texto)
+    if not nome or not m or nome.lower() in texto.split("\n", 1)[0].lower():
+        return texto
+    saudacao, pontuacao, resto = m.group(1), m.group(2), texto[m.end():]
+    if not resto or resto.startswith("\n"):
+        fim = pontuacao if pontuacao in ("!", ".") else "!"
+        return f"{saudacao}, {nome}{fim}{resto}"
+    if pontuacao in ("!", "."):
+        return f"{saudacao}, {nome}{pontuacao} {resto}"
+    return f"{saudacao}, {nome}, {resto}"
+
+
+def _finalizar_texto(
+    texto: str, project: dict, proposal_cfg: dict, full_description: str | None = None
+) -> tuple[str, bool]:
+    """
+    Põe o nome do cliente no cumprimento, anexa a nota_extra e roda a checagem final de
+    segurança. Retorna (texto, substituido) — substituido=True quando o texto violou alguma
+    regra e virou _SAFE_FALLBACK_TEXTO.
+    """
+    texto = com_nome_do_cliente(texto, project)
     # Nota fixa opcional (ex: "estou começando no site, mas tenho portfólio") anexada
     # SEMPRE por fora do texto gerado — decisão explícita do usuário de deixar isso fixo em
     # vez de pedir pra IA reformular a cada vez, pra não arriscar ela variar/errar a
