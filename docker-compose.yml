@@ -3,6 +3,15 @@ services:
     build: .
     container_name: 99freelas-bot
     restart: unless-stopped
+    # O /dev/shm padrão do Docker (64 MB) é pouco pro Chromium: abas travam ou o
+    # navegador cai ("Target crashed") em páginas mais pesadas.
+    shm_size: 1gb
+    # Sem limite, o log do container (docker compose logs) cresce até encher o disco.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     env_file:
       - .env
     environment:

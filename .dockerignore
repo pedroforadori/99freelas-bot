@@ -1,0 +1,14 @@
+# Fica fora da imagem: segredos e sessão (chegam por env_file/volume no compose),
+# estado de execução e o venv local (do Windows, inútil e pesado no container).
+.env
+config.yaml
+data/
+logs/
+venv/
+.git/
+**/__pycache__/
+*.pyc
+tests/
+# Exports de cookies de sessão soltos na raiz (ver .gitignore)
+*_json_*.json
+cookies*.json
