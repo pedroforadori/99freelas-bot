@@ -1,0 +1,52 @@
+# Deploy na VPS da Oracle a cada push/merge na master: roda os testes e, se passarem,
+# faz git push pro repositório do servidor. Lá, o hook deploy/post-receive aplica:
+# só código -> hot reload do bot; Docker/dependências -> rebuild da imagem.
+# Configuração do servidor e dos secrets: ver deploy/README.md.
+name: Deploy na Oracle
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Nunca dois deploys ao mesmo tempo; um novo espera o anterior terminar.
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: false
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Mesma versão do Python da imagem do Playwright (jammy) usada no Docker.
+          python-version: "3.10"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: python -m pytest
+
+  deploy:
+    needs: testes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Histórico completo: push de clone raso pro servidor é recusado.
+          fetch-depth: 0
+      - name: Chave SSH do deploy
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.ORACLE_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Push pro servidor
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          GIT_SSH_COMMAND: ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
+        # --force: o servidor é só um espelho da master (sem commits próprios).
+        run: git push --force "ssh://ubuntu@${HOST}/home/ubuntu/99freelas-bot" HEAD:refs/heads/master

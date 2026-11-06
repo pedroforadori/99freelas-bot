@@ -30,6 +30,8 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+**Produção (2026-11-06): VPS Always Free da Oracle** (São Paulo, Ubuntu 22.04 ARM, 1 OCPU/6 GB, `~/99freelas-bot`, `ssh oracle-bot`). Deploy automático: push/merge na `master` → `.github/workflows/deploy.yml` roda os testes e faz `git push` pro repositório do servidor (`receive.denyCurrentBranch=updateInstead`); o hook `deploy/post-receive` faz rebuild só se mudar Docker/`requirements.txt`, senão o hot reload aplica. Do PC também dá: `git push oracle master`. Configuração e secrets em `deploy/README.md`. `.env`, `config.yaml` e `data/` do servidor ficam fora do git — mudar lá direto + `docker compose restart`. O bot NÃO deve rodar no PC ao mesmo tempo (mesmo bot do Telegram).
+
 **Testes (pytest) — rode antes de reiniciar o bot** (`pip install -r requirements-dev.txt`, depois `python -m pytest`). Nada toca rede, Playwright ou o `data/` real: `tests/conftest.py` isola `data/` num `tmp_path`, troca o Telegram por um fake que grava cada chamada (`requests.post`) e congela a data. `tests/snapshots/` guarda o texto/teclado exato de cada mensagem do Telegram — se um snapshot quebrar, é mudança visível pro usuário; só regrave (`UPDATE_SNAPSHOTS=1 python -m pytest`) quando a mudança for intencional, nunca pra "consertar" um refactor. O fixture `api` do conftest é o único ponto dos testes que sabe onde cada função mora. Não há linter nem build.
 
 ## Arquitetura

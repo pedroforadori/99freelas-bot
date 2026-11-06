@@ -1,0 +1,19 @@
+#!/bin/bash
+# Hook do repositório do bot no servidor (~/99freelas-bot/.git/hooks/post-receive),
+# instalado por deploy/setup-servidor.sh. Roda depois de cada push na master (GitHub
+# Actions ou PC). O push já atualizou os arquivos (receive.denyCurrentBranch=updateInstead).
+# Só código -> o hot reload do bot aplica sozinho. Docker/dependências -> rebuild.
+cd /home/ubuntu/99freelas-bot || exit 1
+unset GIT_DIR
+while read -r old new ref; do
+  [ "$ref" = refs/heads/master ] || continue
+  if [ "$old" = 0000000000000000000000000000000000000000 ] || \
+     git diff --name-only "$old" "$new" | grep -qE '^(requirements\.txt|Dockerfile|docker-compose\.yml|\.dockerignore)$'; then
+    echo "deploy: rebuild da imagem (Docker/dependências mudaram)"
+    docker compose up -d --build 2>&1 | tail -5
+  else
+    echo "deploy: só código, o hot reload do bot aplica em alguns segundos"
+    docker compose up -d 2>&1 | tail -2
+  fi
+  echo "deploy: $(git log --oneline -1)"
+done
