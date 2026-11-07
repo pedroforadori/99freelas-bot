@@ -249,7 +249,7 @@ def _propostas_hoje_line(status: str, simulated: bool) -> str:
     """
     Monta a linha "Hoje: X/Y", onde Y é `utils.daily_quota()` aplicado ao
     MONTHLY_PROPOSAL_QUOTA do .env e X é `storage.proposals_sent_today()`. Diferente de
-    `_conexoes_usadas_line` (saldo REAL do site, resetado na data de renovação do plano),
+    `_conexoes_disponiveis_line` (saldo REAL do site, resetado na data de renovação do plano),
     esse é o ritmo diário LOCAL que o bot se impõe pra não gastar a cota toda de uma vez —
     sempre disponível (não depende do cache de connections.py), por isso não retorna None.
     """
@@ -266,33 +266,35 @@ def _limite_diario_atingido() -> bool:
     return storage.proposals_sent_today() >= daily_quota(monthly_quota)
 
 
-def _conexoes_usadas_line(status: str, simulated: bool) -> str | None:
+def _conexoes_disponiveis_line(status: str, simulated: bool) -> str | None:
     """
-    Monta a linha "Conexões usadas: X/Y" a partir do cache de connections.py (saldo real
-    lido do /dashboard, atualizado uma vez por ciclo). Retorna None se ainda não há cache
-    (ex: primeiro ciclo antes do primeiro refresh, ou refresh sempre falhou).
+    Linha "Conexões disponíveis: N" a partir do cache de connections.py (saldo REAL lido do
+    /dashboard, o "Conexões disponíveis:" do site — plano + não expiráveis — atualizado uma
+    vez por ciclo). Retorna None se ainda não há cache (ex: primeiro ciclo antes do
+    primeiro refresh, ou refresh sempre falhou).
 
-    Y é `plano_total` SOMADO às conexões não-expiráveis (`nao_expiraveis`) — o total real
-    de conexões utilizáveis é maior que o do plano quando a conta tem esse saldo extra
-    (confirmado numa conta real: 240 do plano + 6 não-expiráveis = 246 "disponíveis" no
-    dashboard). Usar só `plano_total` como denominador super-representaria o quanto já foi
-    "usado" e o contador passaria de Y antes de esgotar o saldo de verdade.
+    Antes (até 2026-11-07) mostrava "Conexões usadas: X/Y" calculado pelo plano; o usuário
+    pediu o número que ele vê no site.
 
     notify_proposal_result é chamada de dentro de submitter._finish, ANTES de a proposta
-    ser registrada em storage.py — por isso soma +1 aqui quando o envio foi real e
-    bem-sucedido, senão o contador ficaria uma unidade atrasado.
+    ser registrada em storage.py — por isso desconta 1 aqui quando o envio foi real e
+    bem-sucedido, senão o saldo ficaria uma unidade atrasado.
     """
     cached = connections.read_cached()
     if not cached:
         return None
+    disponiveis = cached.get("disponiveis")
+    if disponiveis is None:
+        # Cache gravado antes de "disponiveis" virar o campo principal.
+        if cached.get("plano_restantes") is None:
+            return None
+        disponiveis = cached["plano_restantes"] + (cached.get("nao_expiraveis") or 0)
 
     ja_enviadas_hoje = storage.proposals_sent_today()
     if status == "sent" and not simulated:
         ja_enviadas_hoje += 1
     enviadas_desde_refresh = max(ja_enviadas_hoje - cached.get("baseline_sent_today", 0), 0)
-    usadas = (cached["plano_total"] - cached["plano_restantes"]) + enviadas_desde_refresh
-    total = cached["plano_total"] + (cached.get("nao_expiraveis") or 0)
-    return f"<b>Conexões usadas:</b> {usadas}/{total}"
+    return f"<b>Conexões disponíveis:</b> {max(disponiveis - enviadas_desde_refresh, 0)}"
 
 
 def aguardando_valor(proposal: dict) -> bool:
@@ -393,7 +395,7 @@ def notify_proposal_result(
             linhas.append(variante_line)
 
     linhas.append(_propostas_hoje_line(status, simulated))
-    linha_conexoes = _conexoes_usadas_line(status, simulated)
+    linha_conexoes = _conexoes_disponiveis_line(status, simulated)
     if linha_conexoes:
         linhas.append(linha_conexoes)
 

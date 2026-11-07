@@ -52,7 +52,7 @@ def _save_seen(seen: set) -> None:
 
 def run_cycle(page, config: dict, seen: set) -> None:
     # Mesmo em simulação, mantém o cache de connections.py atualizado — assim as
-    # notificações de dry run já mostram o contador real "Conexões usadas: X/Y".
+    # notificações de dry run já mostram o saldo real "Conexões disponíveis: N".
     connections.refresh(page)
 
     # Também checa mensagens não lidas em modo de simulação — é só leitura, não interage

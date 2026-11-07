@@ -219,7 +219,7 @@ class Freelas99Source(JobSource):
         auth.save_session(self.page)
 
         # Saldo real de conexões (lido de /dashboard) uma vez por ciclo — usado pelo
-        # contador "Conexões usadas: X/Y" das notificações (views._conexoes_usadas_line).
+        # saldo "Conexões disponíveis: N" das notificações (views._conexoes_disponiveis_line).
         connections.refresh(self.page)
 
         # Com valor manual (proposal.valor_modo) não há o que esperar: o usuário define o preço.
