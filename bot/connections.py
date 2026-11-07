@@ -26,9 +26,13 @@ CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "c
 
 # Ex real (HTML da conta do usuário): "240 conexões restantes de um total de 240 ...
 # referentes ao seu plano (Premium)."
-_PLANO_PATTERN = re.compile(r"(\d+)\s*conex[õo]es?\s*restantes de um total de\s*(\d+)", re.IGNORECASE)
+# Singular e plural: com 1 conexão o site escreve "1 conexão restante de um total de 240"
+# (visto em produção, 2026-11-07 — o padrão antigo só aceitava "conexões restantes" e a
+# leitura inteira falhava com "layout mudou?").
+_CONEXAO = r"conex(?:[õo]es|[ãa]o)"
+_PLANO_PATTERN = re.compile(r"(\d+)\s*" + _CONEXAO + r"\s*restantes? de um total de\s*(\d+)", re.IGNORECASE)
 _DISPONIVEIS_PATTERN = re.compile(r"Conex[õo]es dispon[íi]veis:?\s*(\d+)", re.IGNORECASE)
-_NAO_EXPIRAVEIS_PATTERN = re.compile(r"(\d+)\s*conex[õo]es?\s*n[ãa]o\s*expir[áa]veis", re.IGNORECASE)
+_NAO_EXPIRAVEIS_PATTERN = re.compile(r"(\d+)\s*" + _CONEXAO + r"\s*n[ãa]o\s*expir[áa]ve(?:is|l)", re.IGNORECASE)
 _RENOVACAO_PATTERN = re.compile(r"renovadas no dia\s*(\d{2}/\d{2}/\d{4})", re.IGNORECASE)
 
 
@@ -52,6 +56,28 @@ def read_cached() -> dict | None:
         return _load_cache()
 
 
+def parse_text(texto: str) -> dict | None:
+    """
+    Saldo de conexões a partir do texto do /dashboard, ou None se não achar o principal:
+    "Conexões disponíveis: N" (o total que dá pra gastar — plano + não expiráveis, é o que
+    o usuário olha no site). O detalhe do plano, as não expiráveis e a renovação são
+    opcionais.
+    """
+    disponiveis_match = _DISPONIVEIS_PATTERN.search(texto)
+    if not disponiveis_match:
+        return None
+    plano_match = _PLANO_PATTERN.search(texto)
+    nao_expiraveis_match = _NAO_EXPIRAVEIS_PATTERN.search(texto)
+    renovacao_match = _RENOVACAO_PATTERN.search(texto)
+    return {
+        "disponiveis": int(disponiveis_match.group(1)),
+        "plano_restantes": int(plano_match.group(1)) if plano_match else None,
+        "plano_total": int(plano_match.group(2)) if plano_match else None,
+        "nao_expiraveis": int(nao_expiraveis_match.group(1)) if nao_expiraveis_match else None,
+        "renovacao": renovacao_match.group(1) if renovacao_match else None,
+    }
+
+
 def refresh(page) -> dict | None:
     """
     Navega pra /dashboard, extrai o saldo real de conexões do texto da página e salva no
@@ -68,27 +94,17 @@ def refresh(page) -> dict | None:
         page.goto(sel.DASHBOARD_URL, wait_until="load")
         texto = page.inner_text("body")
 
-        plano_match = _PLANO_PATTERN.search(texto)
-        if not plano_match:
+        data = parse_text(texto)
+        if data is None:
             log.warning("Não foi possível ler o saldo de conexões em %s (layout mudou?).", sel.DASHBOARD_URL)
             return read_cached()
-
-        disponiveis_match = _DISPONIVEIS_PATTERN.search(texto)
-        nao_expiraveis_match = _NAO_EXPIRAVEIS_PATTERN.search(texto)
-        renovacao_match = _RENOVACAO_PATTERN.search(texto)
-
-        data = {
-            "plano_restantes": int(plano_match.group(1)),
-            "plano_total": int(plano_match.group(2)),
-            "disponiveis": int(disponiveis_match.group(1)) if disponiveis_match else None,
-            "nao_expiraveis": int(nao_expiraveis_match.group(1)) if nao_expiraveis_match else None,
-            "renovacao": renovacao_match.group(1) if renovacao_match else None,
+        data.update({
             # Snapshot de quantas propostas reais já tinham sido enviadas hoje no momento
             # deste refresh — notifier.py soma em cima disso o que foi enviado DEPOIS
             # deste refresh, sem precisar visitar o dashboard a cada proposta.
             "baseline_sent_today": storage.proposals_sent_today(),
             "fetched_at": datetime.utcnow().isoformat(),
-        }
+        })
         with _LOCK:
             _save_cache(data)
         return data
